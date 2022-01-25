@@ -1,5 +1,9 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { JSONSchemaType } from "ajv";
 import { RouterState } from "connected-react-router";
+import { Subscription } from "rxjs";
 import {
   AvailablePackageDetail,
   AvailablePackageSummary,
@@ -14,12 +18,28 @@ import { IAuthState } from "../reducers/auth";
 import { IClustersState } from "../reducers/cluster";
 import { IConfigState } from "../reducers/config";
 import { IAppRepositoryState } from "../reducers/repos";
-class CustomError extends Error {
+import { RpcError } from "./RpcError";
+
+export class CustomError extends Error {
+  public causes: Error[] | undefined;
   // The constructor is defined so we can later on compare the returned object
-  // via err.contructor  == FOO
-  constructor(message?: string) {
+  // via err.constructor  == FOO
+  constructor(message?: string, causes?: Error[]) {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);
+    this.causes = causes;
+    this.checkCauses();
+  }
+  // Workaround used until RPC code (unary) throws a custom rpc error
+  // Check if any RPC error is among the causes
+  private checkCauses() {
+    if (!this.causes) return;
+    for (let i = 0; i < this.causes.length; i++) {
+      const cause = this.causes[i];
+      if (RpcError.isRpcError(cause)) {
+        this.causes[i] = new RpcError(cause);
+      }
+    }
   }
 }
 
@@ -440,10 +460,11 @@ export interface IKind {
 
 export interface IKubeState {
   items: { [s: string]: IKubeItem<IResource | IK8sList<IResource, {}>> };
-  sockets: { [s: string]: { socket: WebSocket; onError: (e: Event) => void } };
+  subscriptions: { [s: string]: Subscription };
+  // TODO(minelson): Remove kinds and kindsError once the operator support is
+  // removed from the dashboard or replaced with a plugin.
   kinds: { [kind: string]: IKind };
   kindsError?: Error;
-  timers: { [id: string]: NodeJS.Timer | undefined };
 }
 
 export interface IBasicFormParam {

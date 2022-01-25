@@ -1,18 +1,5 @@
-/*
-Copyright 2021 VMware. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package cmd
 
@@ -38,7 +25,11 @@ func TestParseFlagsCorrect(t *testing.T) {
 				"--plugin-dir", "foo01",
 				"--clusters-config-path", "foo02",
 				"--pinniped-proxy-url", "foo03",
+				"--global-repos-namespace", "kubeapps-global",
 				"--unsafe-local-dev-kubeconfig", "true",
+				"--plugin-config-path", "foo05",
+				"--kube-api-qps", "1.0",
+				"--kube-api-burst", "1",
 			},
 			core.ServeOptions{
 				Port:                     901,
@@ -46,6 +37,10 @@ func TestParseFlagsCorrect(t *testing.T) {
 				ClustersConfigPath:       "foo02",
 				PinnipedProxyURL:         "foo03",
 				UnsafeLocalDevKubeconfig: true,
+				GlobalReposNamespace:     "kubeapps-global",
+				PluginConfigPath:         "foo05",
+				QPS:                      1.0,
+				Burst:                    1,
 			},
 		},
 	}

@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import {
   AvailablePackageDetail,
   InstalledPackageDetail,
@@ -5,6 +8,7 @@ import {
   GetInstalledPackageSummariesResponse,
   InstalledPackageReference,
   VersionReference,
+  ReconciliationOptions,
 } from "gen/kubeappsapis/core/packages/v1alpha1/packages";
 import { Plugin } from "gen/kubeappsapis/core/plugins/v1alpha1/plugins";
 import configureMockStore from "redux-mock-store";
@@ -163,6 +167,44 @@ describe("deploy package", () => {
       { identifier: "testrepo/foo" },
       { version: "1.2.3" },
       undefined,
+      undefined,
+    );
+    const expectedActions = [
+      { type: getType(actions.apps.requestInstallPackage) },
+      { type: getType(actions.apps.receiveInstallPackage) },
+    ];
+    expect(store.getActions()).toEqual(expectedActions);
+  });
+
+  it("returns true if namespace is correct and deployment is successful with custom service account", async () => {
+    const res = await store.dispatch(
+      actions.apps.installPackage(
+        "target-cluster",
+        "target-namespace",
+        {
+          name: "my-version",
+          availablePackageRef: {
+            identifier: "testrepo/foo",
+          },
+          version: {
+            pkgVersion: "1.2.3",
+            appVersion: "3.2.1",
+          },
+        } as AvailablePackageDetail,
+        "my-release",
+        undefined,
+        undefined,
+        { serviceAccountName: "my-sa" } as ReconciliationOptions,
+      ),
+    );
+    expect(res).toBe(true);
+    expect(App.CreateInstalledPackage).toHaveBeenCalledWith(
+      { cluster: "target-cluster", namespace: "target-namespace" },
+      "my-release",
+      { identifier: "testrepo/foo" },
+      { version: "1.2.3" },
+      undefined,
+      { serviceAccountName: "my-sa" } as ReconciliationOptions,
     );
     const expectedActions = [
       { type: getType(actions.apps.requestInstallPackage) },

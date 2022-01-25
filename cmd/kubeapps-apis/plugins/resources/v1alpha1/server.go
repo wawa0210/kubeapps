@@ -1,20 +1,12 @@
-/*
-Copyright © 2021 VMware
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-    http://www.apache.org/licenses/LICENSE-2.0
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 
@@ -22,7 +14,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/anypb"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -39,6 +30,7 @@ import (
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/core"
 	pkgsGRPCv1alpha1 "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/packages/v1alpha1"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/plugins/resources/v1alpha1"
+	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/statuserror"
 )
 
 type clientGetter func(context.Context, string) (kubernetes.Interface, dynamic.Interface, error)
@@ -58,10 +50,11 @@ type Server struct {
 	// We keep a restmapper to cache discovery of REST mappings from GVK->GVR.
 	restMapper meta.RESTMapper
 
-	// kindToResource is a function to convert a GVK to GVR. Can be replaced
-	// in tests with a dummy version using the unsafe helpers while the real
-	// implementation queries the k8s API for a REST mapper.
-	kindToResource func(meta.RESTMapper, schema.GroupVersionKind) (schema.GroupVersionResource, error)
+	// kindToResource is a function to convert a GVK to GVR with
+	// namespace/cluster scope information. Can be replaced in tests with a
+	// stub version using the unsafe helpers while the real implementation
+	// queries the k8s API for a REST mapper.
+	kindToResource func(meta.RESTMapper, schema.GroupVersionKind) (schema.GroupVersionResource, meta.RESTScopeName, error)
 }
 
 // createRESTMapper returns a rest mapper configured with the APIs of the
@@ -121,12 +114,12 @@ func NewServer(configGetter core.KubernetesConfigGetter) (*Server, error) {
 			return pkgsGRPCv1alpha1.NewPackagesServiceClient(conn), nil
 		},
 		restMapper: mapper,
-		kindToResource: func(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (schema.GroupVersionResource, error) {
+		kindToResource: func(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (schema.GroupVersionResource, meta.RESTScopeName, error) {
 			mapping, err := mapper.RESTMapping(gvk.GroupKind())
 			if err != nil {
-				return schema.GroupVersionResource{}, err
+				return schema.GroupVersionResource{}, "", err
 			}
-			return mapping.Resource, nil
+			return mapping.Resource, mapping.Scope.Name(), nil
 		},
 	}, nil
 }
@@ -153,7 +146,6 @@ func (s *Server) GetResources(r *v1alpha1.GetResourcesRequest, stream v1alpha1.R
 	if err != nil {
 		return err
 	}
-
 	var resourcesToReturn []*pkgsGRPCv1alpha1.ResourceRef
 	// If the request didn't specify a filter of resource refs,
 	// we return all those found for the installed package. Otherwise
@@ -192,14 +184,16 @@ func (s *Server) GetResources(r *v1alpha1.GetResourcesRequest, stream v1alpha1.R
 		}
 		gvk := groupVersion.WithKind(ref.Kind)
 
-		gvr, err := s.kindToResource(s.restMapper, gvk)
+		// We need to get or watch a different endpoint depending on
+		// the scope of the resource (namespaced or not).
+		gvr, scopeName, err := s.kindToResource(s.restMapper, gvk)
 		if err != nil {
 			return status.Errorf(codes.Internal, "unable to map group-kind %v to resource: %s", gvk.GroupKind(), err.Error())
 		}
 
 		if !r.GetWatch() {
 			var resource interface{}
-			if ref.Namespace != "" {
+			if scopeName == meta.RESTScopeNameNamespace {
 				resource, err = dynamicClient.Resource(gvr).Namespace(ref.Namespace).Get(stream.Context(), ref.GetName(), metav1.GetOptions{})
 			} else {
 				resource, err = dynamicClient.Resource(gvr).Get(stream.Context(), ref.GetName(), metav1.GetOptions{})
@@ -207,7 +201,6 @@ func (s *Server) GetResources(r *v1alpha1.GetResourcesRequest, stream v1alpha1.R
 			if err != nil {
 				return status.Errorf(codes.Internal, "unable to get resource referenced by %+v: %s", ref, err.Error())
 			}
-
 			err = sendResourceData(ref, resource, stream)
 			if err != nil {
 				return err
@@ -216,8 +209,17 @@ func (s *Server) GetResources(r *v1alpha1.GetResourcesRequest, stream v1alpha1.R
 			continue
 		}
 
-		watcher, err := dynamicClient.Resource(gvr).Namespace(namespace).Watch(stream.Context(), metav1.ListOptions{})
+		listOptions := metav1.ListOptions{
+			FieldSelector: fmt.Sprintf("metadata.name=%s", ref.GetName()),
+		}
+		var watcher watch.Interface
+		if scopeName == meta.RESTScopeNameNamespace {
+			watcher, err = dynamicClient.Resource(gvr).Namespace(ref.Namespace).Watch(stream.Context(), listOptions)
+		} else {
+			watcher, err = dynamicClient.Resource(gvr).Watch(stream.Context(), listOptions)
+		}
 		if err != nil {
+			log.Errorf("unable to watch resource %v: %v", ref, err)
 			return status.Errorf(codes.Internal, "unable to watch resource %v", ref)
 		}
 		watchers = append(watchers, &ResourceWatcher{
@@ -241,6 +243,34 @@ func (s *Server) GetResources(r *v1alpha1.GetResourcesRequest, stream v1alpha1.R
 	return nil
 }
 
+// GetServiceAccountNames returns the list of service account names in a given cluster and namespace.
+func (s *Server) GetServiceAccountNames(ctx context.Context, r *v1alpha1.GetServiceAccountNamesRequest) (*v1alpha1.GetServiceAccountNamesResponse, error) {
+	namespace := r.GetContext().GetNamespace()
+	cluster := r.GetContext().GetCluster()
+	log.Infof("+resources GetServiceAccountNames (cluster: %q, namespace=%q)", cluster, namespace)
+
+	typedClient, _, err := s.clientGetter(ctx, cluster)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "unable to get the k8s client: '%v'", err)
+	}
+
+	saList, err := typedClient.CoreV1().ServiceAccounts(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, statuserror.FromK8sError("list", "ServiceAccounts", "", err)
+	}
+
+	// We only need to send the list of SA names (ie, not sending secret names)
+	saStringList := []string{}
+	for _, sa := range saList.Items {
+		saStringList = append(saStringList, sa.Name)
+	}
+
+	return &v1alpha1.GetServiceAccountNamesResponse{
+		ServiceaccountNames: saStringList,
+	}, nil
+
+}
+
 // sendResourceData just DRYs up this functionality shared between requests to
 // watch or get resources.
 func sendResourceData(ref *pkgsGRPCv1alpha1.ResourceRef, obj interface{}, s v1alpha1.ResourcesService_GetResourcesServer) error {
@@ -248,11 +278,12 @@ func sendResourceData(ref *pkgsGRPCv1alpha1.ResourceRef, obj interface{}, s v1al
 	if err != nil {
 		return status.Errorf(codes.Internal, "unable to marshal json for resource: %s", err.Error())
 	}
+
+	// Note, a string in Go is effectively a read-only slice of bytes.
+	// See https://stackoverflow.com/a/50880408 for interesting links.
 	s.Send(&v1alpha1.GetResourcesResponse{
 		ResourceRef: ref,
-		Manifest: &anypb.Any{
-			Value: resourceBytes,
-		},
+		Manifest:    string(resourceBytes),
 	})
 
 	return nil
@@ -368,5 +399,6 @@ func copyAuthorizationMetadataForOutgoing(ctx context.Context) (context.Context,
 func resourceRefsEqual(r1, r2 *pkgsGRPCv1alpha1.ResourceRef) bool {
 	return r1.ApiVersion == r2.ApiVersion &&
 		r1.Kind == r2.Kind &&
+		r1.Namespace == r2.Namespace &&
 		r1.Name == r2.Name
 }

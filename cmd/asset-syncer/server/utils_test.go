@@ -1,18 +1,5 @@
-/*
-Copyright 2021 VMware. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package server
 
@@ -35,9 +22,9 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/disintegration/imaging"
 	"github.com/google/go-cmp/cmp"
-	"github.com/kubeapps/common/datastore"
 	apprepov1alpha1 "github.com/kubeapps/kubeapps/cmd/apprepository-controller/pkg/apis/apprepository/v1alpha1"
 	"github.com/kubeapps/kubeapps/pkg/chart/models"
+	"github.com/kubeapps/kubeapps/pkg/dbutils"
 	"github.com/kubeapps/kubeapps/pkg/helm"
 	helmfake "github.com/kubeapps/kubeapps/pkg/helm/fake"
 	helmtest "github.com/kubeapps/kubeapps/pkg/helm/test"
@@ -377,7 +364,7 @@ func Test_newManager(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := datastore.Config{URL: tt.dbURL, Database: tt.dbName, Username: tt.dbUser, Password: tt.dbPass}
+			config := dbutils.Config{URL: tt.dbURL, Database: tt.dbName, Username: tt.dbUser, Password: tt.dbPass}
 			_, err := newManager(config, "kubeapps")
 			assert.NoError(t, err)
 		})
@@ -1294,6 +1281,124 @@ func Test_filterCharts(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUnescapeChartsData(t *testing.T) {
+	tests := []struct {
+		description string
+		input       []models.Chart
+		expected    []models.Chart
+	}{
+		{
+			"chart with encoded spaces in id",
+			[]models.Chart{
+				{ID: "foo%20bar"},
+			},
+			[]models.Chart{
+				{ID: "foo bar"},
+			},
+		},
+		{
+			"chart with encoded spaces in name",
+			[]models.Chart{
+				{Name: "foo%20bar"},
+			},
+			[]models.Chart{
+				{Name: "foo bar"},
+			},
+		},
+		{
+			"chart with mixed encoding in name",
+			[]models.Chart{
+				{Name: "test/foo%20bar"},
+			},
+			[]models.Chart{
+				{Name: "test/foo bar"},
+			},
+		},
+		{
+			"chart with no encoding nor spaces",
+			[]models.Chart{
+				{Name: "test/foobar"},
+			},
+			[]models.Chart{
+				{Name: "test/foobar"},
+			},
+		},
+		{
+			"chart with unencoded spaces",
+			[]models.Chart{
+				{Name: "test/foo bar"},
+			},
+			[]models.Chart{
+				{Name: "test/foo bar"},
+			},
+		},
+		{
+			"chart with encoded chars in name",
+			[]models.Chart{
+				{Name: "foo%23bar%2ebar"},
+			},
+			[]models.Chart{
+				{Name: "foo#bar.bar"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.description, func(t *testing.T) {
+			res := unescapeChartsData(tt.input)
+			if !cmp.Equal(res, tt.expected) {
+				t.Errorf("Unexpected result: %v", cmp.Diff(res, tt.expected))
+			}
+		})
+	}
+}
+
+func TestHelmRepoAppliesUnescape(t *testing.T) {
+	repo := &models.RepoInternal{Name: "test", Namespace: "repo-namespace", URL: "http://testrepo.com"}
+	expectedRepo := &models.Repo{Name: repo.Name, Namespace: repo.Namespace, URL: repo.URL}
+	repoIndexYAMLBytes, _ := ioutil.ReadFile("testdata/helm-index-spaces.yaml")
+	repoIndexYAML := string(repoIndexYAMLBytes)
+	expectedCharts := []models.Chart{
+		{
+			ID:            "test/chart$with$chars",
+			Name:          "chart$with$chars",
+			Repo:          expectedRepo,
+			Maintainers:   []chart.Maintainer{},
+			ChartVersions: []models.ChartVersion{{AppVersion: "v1"}},
+		},
+		{
+			ID:            "test/chart with spaces",
+			Name:          "chart with spaces",
+			Repo:          expectedRepo,
+			Maintainers:   []chart.Maintainer{},
+			ChartVersions: []models.ChartVersion{{AppVersion: "v1"}},
+		},
+		{
+			ID:            "test/chart#with#hashes",
+			Name:          "chart#with#hashes",
+			Repo:          expectedRepo,
+			Maintainers:   []chart.Maintainer{},
+			ChartVersions: []models.ChartVersion{{AppVersion: "v3"}},
+		},
+		{
+			ID:            "test/chart-without-spaces",
+			Name:          "chart-without-spaces",
+			Repo:          expectedRepo,
+			Maintainers:   []chart.Maintainer{},
+			ChartVersions: []models.ChartVersion{{AppVersion: "v2"}},
+		},
+	}
+	helmRepo := &HelmRepo{
+		content:      []byte(repoIndexYAML),
+		RepoInternal: repo,
+	}
+	t.Run("Helm repo applies unescaping to chart data", func(t *testing.T) {
+		charts, _ := helmRepo.Charts(false)
+		if !cmp.Equal(charts, expectedCharts) {
+			t.Errorf("Unexpected result: %v", cmp.Diff(charts, expectedCharts))
+		}
+	})
 }
 
 func Test_isURLDomainEqual(t *testing.T) {

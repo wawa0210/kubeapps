@@ -1,18 +1,5 @@
-/*
-Copyright 2021 VMware. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package server
 
@@ -22,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strings"
+	"time"
 
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/soheilhy/cmux"
@@ -34,16 +23,54 @@ import (
 	pluginsGRPCv1alpha1 "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/plugins/v1alpha1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
-	log "k8s.io/klog/v2"
+	klogv2 "k8s.io/klog/v2"
 )
+
+func getLogLevelOfEndpoint(endpoint string) klogv2.Level {
+
+	// Add all endpoint function names which you want to suppress in interceptor logging
+	supressLoggingOfEndpoints := []string{"GetConfiguredPlugins"}
+	var level klogv2.Level
+
+	// level=3 is default logging level
+	level = 3
+	for i := 0; i < len(supressLoggingOfEndpoints); i++ {
+		if strings.Contains(endpoint, supressLoggingOfEndpoints[i]) {
+			level = 4
+			break
+		}
+	}
+
+	return level
+}
+
+// LogRequest is a gRPC UnaryServerInterceptor that will log the API call
+func LogRequest(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (response interface{}, err error) {
+
+	start := time.Now()
+	res, err := handler(ctx, req)
+
+	level := getLogLevelOfEndpoint(info.FullMethod)
+
+	// Format string : [status code] [duration] [full path]
+	// OK 97.752µs /kubeappsapis.core.packages.v1alpha1.PackagesService/GetAvailablePackageSummaries
+	klogv2.V(level).Infof("%v %s %s\n",
+		status.Code(err),
+		time.Since(start),
+		info.FullMethod)
+
+	return res, err
+}
 
 // Serve is the root command that is run when no other sub-commands are present.
 // It runs the gRPC service, registering the configured plugins.
 func Serve(serveOpts core.ServeOptions) error {
 	// Create the grpc server and register the reflection server (for now, useful for discovery
 	// using grpcurl) or similar.
-	grpcSrv := grpc.NewServer()
+
+	grpcSrv := grpc.NewServer(grpc.ChainUnaryInterceptor(LogRequest))
 	reflection.Register(grpcSrv)
 
 	// Create the http server, register our core service followed by any plugins.
@@ -124,27 +151,27 @@ func Serve(serveOpts core.ServeOptions) error {
 	go func() {
 		err := grpcSrv.Serve(grpcLis)
 		if err != nil {
-			log.Fatalf("failed to serve: %v", err)
+			klogv2.Fatalf("failed to serve: %v", err)
 		}
 	}()
 	go func() {
 		err := grpcSrv.Serve(grpcwebLis)
 		if err != nil {
-			log.Fatalf("failed to serve: %v", err)
+			klogv2.Fatalf("failed to serve: %v", err)
 		}
 	}()
 	go func() {
 		err := httpSrv.Serve(httpLis)
 		if err != nil {
-			log.Fatalf("failed to serve: %v", err)
+			klogv2.Fatalf("failed to serve: %v", err)
 		}
 	}()
 
 	if serveOpts.UnsafeLocalDevKubeconfig {
-		log.Warning("Using the local Kubeconfig file instead of the actual in-cluster's config. This is not recommended except for development purposes.")
+		klogv2.Warning("Using the local Kubeconfig file instead of the actual in-cluster's config. This is not recommended except for development purposes.")
 	}
 
-	log.Infof("Starting server on :%d", serveOpts.Port)
+	klogv2.Infof("Starting server on :%d", serveOpts.Port)
 	if err := mux.Serve(); err != nil {
 		return fmt.Errorf("failed to serve: %v", err)
 	}

@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { LocationChangeAction, LOCATION_CHANGE } from "connected-react-router";
 import { IAppRepository, ISecret } from "shared/types";
 import { getType } from "typesafe-actions";
@@ -22,7 +25,6 @@ export interface IAppRepositoryState {
   validating: boolean;
   repo: IAppRepository;
   repos: IAppRepository[];
-  repoSecrets: ISecret[];
   form: {
     name: string;
     namespace: string;
@@ -50,7 +52,6 @@ export const initialState: IAppRepositoryState = {
   validating: false,
   repo: {} as IAppRepository,
   repos: [],
-  repoSecrets: [],
   imagePullSecrets: [],
 };
 
@@ -84,22 +85,6 @@ const reposReducer = (
         repo: action.payload,
         errors: {},
       };
-    case getType(actions.repos.receiveReposSecret): {
-      const secret = action.payload;
-      const existingSecret = state.repoSecrets.findIndex(
-        s =>
-          s.metadata.name === secret.metadata.name &&
-          s.metadata.namespace === secret.metadata.namespace,
-      );
-      let repoSecrets: ISecret[];
-      if (existingSecret > -1) {
-        repoSecrets = [...state.repoSecrets];
-        repoSecrets[existingSecret] = secret;
-      } else {
-        repoSecrets = state.repoSecrets.concat(secret);
-      }
-      return { ...state, repoSecrets };
-    }
     case getType(actions.repos.requestRepos):
       return { ...state, ...isFetching(state, "repositories", true) };
     case getType(actions.repos.addRepo):
@@ -129,10 +114,6 @@ const reposReducer = (
       return { ...state, redirectTo: action.payload };
     case getType(actions.repos.redirected):
       return { ...state, redirectTo: undefined };
-    case getType(actions.repos.requestImagePullSecrets):
-      return { ...state, ...isFetching(state, "secrets", true) };
-    case getType(actions.repos.receiveImagePullSecrets):
-      return { ...state, ...isFetching(state, "secrets", false), imagePullSecrets: action.payload };
     case getType(actions.repos.errorRepos):
       return {
         ...state,

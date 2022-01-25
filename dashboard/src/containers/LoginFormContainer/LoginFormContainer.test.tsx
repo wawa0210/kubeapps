@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { shallow } from "enzyme";
 import { Location } from "history";
 import { IAuthState } from "reducers/auth";
@@ -32,8 +35,10 @@ const makeStore = (
     loaded: true,
     kubeappsCluster: "",
     kubeappsNamespace: "",
+    globalReposNamespace: "",
     appVersion: "",
     oauthLogoutURI: "",
+    featureFlags: { operators: false },
     clusters: [],
     authProxySkipLoginPage: false,
     theme: SupportedThemes.light,

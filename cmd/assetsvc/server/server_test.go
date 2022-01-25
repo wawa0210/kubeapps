@@ -1,18 +1,5 @@
-/*
-Copyright 2021 VMware. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package server
 
@@ -91,7 +78,7 @@ func Test_GetCharts(t *testing.T) {
 				rows.AddRow(string(chartJSON))
 			}
 			mock.ExpectQuery("SELECT info FROM charts WHERE *").
-				WithArgs("my-namespace", kubeappsNamespace).
+				WithArgs("my-namespace", globalReposNamespace).
 				WillReturnRows(rows)
 
 			mock.ExpectQuery("^SELECT count(.+) FROM").
@@ -149,7 +136,7 @@ func Test_GetChartCategories(t *testing.T) {
 				rows.AddRow(chartCategories.Name, chartCategories.Count)
 			}
 			mock.ExpectQuery("SELECT (info ->> 'category')*").
-				WithArgs("my-namespace", kubeappsNamespace).
+				WithArgs("my-namespace", globalReposNamespace).
 				WillReturnRows(rows)
 
 			res, err := http.Get(ts.URL + pathPrefix + "/clusters/default/namespaces/my-namespace/charts/categories")
@@ -211,7 +198,7 @@ func Test_GetChartCategoriesRepo(t *testing.T) {
 				rows.AddRow(chartCategories.Name, chartCategories.Count)
 			}
 			mock.ExpectQuery("SELECT (info ->> 'category')*").
-				WithArgs("my-namespace", kubeappsNamespace, tt.repo).
+				WithArgs("my-namespace", globalReposNamespace, tt.repo).
 				WillReturnRows(rows)
 
 			res, err := http.Get(ts.URL + pathPrefix + "/clusters/default/namespaces/my-namespace/charts/" + tt.repo + "/categories")
@@ -263,7 +250,7 @@ func Test_GetChartsInRepo(t *testing.T) {
 				rows.AddRow(string(chartJSON))
 			}
 			mock.ExpectQuery("SELECT info FROM charts WHERE *").
-				WithArgs("my-namespace", kubeappsNamespace, tt.repo).
+				WithArgs("my-namespace", globalReposNamespace, tt.repo).
 				WillReturnRows(rows)
 
 			mock.ExpectQuery("^SELECT count(.+) FROM").

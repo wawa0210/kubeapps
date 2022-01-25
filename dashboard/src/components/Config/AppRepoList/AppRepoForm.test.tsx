@@ -1,3 +1,6 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { CdsButton } from "@cds/react/button";
 import actions from "actions";
 import Alert from "components/js/Alert";
@@ -7,6 +10,9 @@ import { defaultStore, getStore, mountWrapper } from "shared/specs/mountWrapper"
 import { ISecret } from "shared/types";
 import AppRepoAddDockerCreds from "./AppRepoAddDockerCreds";
 import { AppRepoForm } from "./AppRepoForm";
+import { AppRepository } from "shared/AppRepository";
+import { waitFor } from "@testing-library/react";
+import Secret from "shared/Secret";
 
 const defaultProps = {
   onSubmit: jest.fn(),
@@ -20,11 +26,10 @@ beforeEach(() => {
   actions.repos = {
     ...actions.repos,
     validateRepo: jest.fn().mockReturnValue(true),
-    fetchImagePullSecrets: jest.fn(),
-    fetchRepoSecret: jest.fn(),
   };
   const mockDispatch = jest.fn(r => r);
   spyOnUseDispatch = jest.spyOn(ReactRedux, "useDispatch").mockReturnValue(mockDispatch);
+  Secret.getDockerConfigSecretNames = jest.fn(() => Promise.resolve([]));
 });
 
 afterEach(() => {
@@ -34,7 +39,10 @@ afterEach(() => {
 
 it("fetches repos and imagePullSecrets", () => {
   mountWrapper(defaultStore, <AppRepoForm {...defaultProps} />);
-  expect(actions.repos.fetchImagePullSecrets).toHaveBeenCalledWith(defaultProps.namespace);
+  expect(Secret.getDockerConfigSecretNames).toHaveBeenCalledWith(
+    "default-cluster",
+    defaultProps.namespace,
+  );
 });
 
 it("disables the submit button while fetching", () => {
@@ -48,6 +56,25 @@ it("disables the submit button while fetching", () => {
       .filterWhere(b => b.html().includes("Validating"))
       .prop("disabled"),
   ).toBe(true);
+});
+
+it("submit button can not be fired more than once", async () => {
+  const onSubmit = jest.fn().mockReturnValue(true);
+  const onAfterInstall = jest.fn().mockReturnValue(true);
+  const wrapper = mountWrapper(
+    defaultStore,
+    <AppRepoForm {...defaultProps} onSubmit={onSubmit} onAfterInstall={onAfterInstall} />,
+  );
+  const installButton = wrapper.find(CdsButton).filterWhere(b => b.html().includes("Install Repo"));
+  await act(async () => {
+    Promise.all([
+      installButton.simulate("submit"),
+      installButton.simulate("submit"),
+      installButton.simulate("submit"),
+    ]);
+  });
+  wrapper.update();
+  expect(onSubmit.mock.calls.length).toBe(1);
 });
 
 it("should show a validation error", () => {
@@ -104,15 +131,13 @@ it("should not call the install method when the validation fails unless forced",
       .text(),
   ).toContain("Install Repo (force)");
 
-  // So disabling this test for the moment.
   await act(async () => {
-    await (
-      wrapper
-        .find(CdsButton)
-        .filterWhere(b => b.html().includes("Install Repo (force)"))
-        .prop("onClick") as () => Promise<any>
-    )();
+    wrapper
+      .find(CdsButton)
+      .filterWhere(b => b.html().includes("Install Repo (force)"))
+      .simulate("submit");
   });
+  wrapper.update();
   expect(install).toHaveBeenCalled();
 });
 
@@ -361,7 +386,7 @@ describe("when using a description", () => {
   });
 });
 
-it("should disable the docker registry credentials section if the namespace is the global one", () => {
+it("should deactivate the docker registry credentials section if the namespace is the global one", () => {
   const wrapper = mountWrapper(
     defaultStore,
     <AppRepoForm {...defaultProps} kubeappsNamespace={defaultProps.namespace} />,
@@ -487,7 +512,7 @@ describe("when the repository info is already populated", () => {
     const repo = { metadata: { name: "foo" } } as any;
     const wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
     expect(wrapper.find("#kubeapps-repo-name").prop("value")).toBe("foo");
-    // It should also disable the name input if it's already been set
+    // It should also deactivate the name input if it's already been set
     expect(wrapper.find("#kubeapps-repo-name").prop("disabled")).toBe(true);
   });
 
@@ -504,50 +529,81 @@ describe("when the repository info is already populated", () => {
   });
 
   describe("when there is a secret associated to the repo", () => {
-    it("should parse the existing CA cert", () => {
+    it("should parse the existing CA cert", async () => {
       const repo = {
-        metadata: { name: "foo" },
+        metadata: { name: "foo", namespace: "default" },
         spec: { auth: { customCA: { secretKeyRef: { name: "bar" } } } },
       } as any;
       const secret = { data: { "ca.crt": "Zm9v" } } as any;
-      const wrapper = mountWrapper(
-        defaultStore,
-        <AppRepoForm {...defaultProps} repo={repo} secret={secret} />,
-      );
-      expect(actions.repos.fetchRepoSecret).toHaveBeenCalledWith("default", "bar");
-      expect(wrapper.find("#kubeapps-repo-custom-ca").prop("value")).toBe("foo");
+      AppRepository.getSecretForRepo = jest.fn(() => secret);
+
+      let wrapper: any;
+      act(() => {
+        wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
+      });
+
+      await waitFor(() => {
+        wrapper.update();
+        expect(AppRepository.getSecretForRepo).toHaveBeenCalledWith(
+          "default-cluster",
+          "default",
+          "foo",
+        );
+        expect(wrapper.find("#kubeapps-repo-custom-ca").prop("value")).toBe("foo");
+      });
     });
 
-    it("should parse the existing auth header", () => {
+    it("should parse the existing auth header", async () => {
       const repo = {
-        metadata: { name: "foo" },
+        metadata: { name: "foo", namespace: "default" },
         spec: { auth: { header: { secretKeyRef: { name: "bar" } } } },
       } as any;
       const secret = { data: { authorizationHeader: "Zm9v" } } as any;
-      const wrapper = mountWrapper(
-        defaultStore,
-        <AppRepoForm {...defaultProps} repo={repo} secret={secret} />,
-      );
-      expect(actions.repos.fetchRepoSecret).toHaveBeenCalledWith("default", "bar");
-      expect(wrapper.find("#kubeapps-repo-custom-header").prop("value")).toBe("foo");
+      AppRepository.getSecretForRepo = jest.fn(() => secret);
+
+      let wrapper: any;
+      act(() => {
+        wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
+      });
+
+      await waitFor(() => {
+        wrapper.update();
+        expect(AppRepository.getSecretForRepo).toHaveBeenCalledWith(
+          "default-cluster",
+          "default",
+          "foo",
+        );
+        expect(wrapper.find("#kubeapps-repo-custom-header").prop("value")).toBe("foo");
+      });
     });
 
-    it("should parse the existing basic auth", () => {
-      const repo = { metadata: { name: "foo" } } as any;
+    it("should parse the existing basic auth", async () => {
+      const repo = {
+        metadata: { name: "foo", namespace: "default" },
+        spec: { auth: { header: { secretKeyRef: { name: "bar" } } } },
+      } as any;
       const secret = { data: { authorizationHeader: "QmFzaWMgWm05dk9tSmhjZz09" } } as any;
-      const wrapper = mountWrapper(
-        defaultStore,
-        <AppRepoForm {...defaultProps} repo={repo} secret={secret} />,
-      );
-      expect(wrapper.find("#kubeapps-repo-username").prop("value")).toBe("foo");
-      expect(wrapper.find("#kubeapps-repo-password").prop("value")).toBe("bar");
+      AppRepository.getSecretForRepo = jest.fn(() => secret);
+
+      let wrapper: any;
+      act(() => {
+        wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
+      });
+
+      await waitFor(() => {
+        wrapper.update();
+        expect(wrapper.find("#kubeapps-repo-username").prop("value")).toBe("foo");
+        expect(wrapper.find("#kubeapps-repo-password").prop("value")).toBe("bar");
+      });
     });
 
-    it("should parse the existing type", () => {
+    it("should parse the existing type", async () => {
       const repo = { metadata: { name: "foo" }, spec: { type: "oci" } } as any;
       const wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
-      expect(wrapper.find("#kubeapps-repo-type-oci")).toBeChecked();
-      expect(wrapper.find("#kubeapps-oci-repositories")).toExist();
+      await waitFor(() => {
+        expect(wrapper.find("#kubeapps-repo-type-oci")).toBeChecked();
+        expect(wrapper.find("#kubeapps-oci-repositories")).toExist();
+      });
     });
 
     it("should parse the existing skip tls config", () => {
@@ -562,43 +618,60 @@ describe("when the repository info is already populated", () => {
       expect(wrapper.find("#kubeapps-repo-pass-credentials")).toBeChecked();
     });
 
-    it("should parse a bearer token", () => {
-      const repo = { metadata: { name: "foo" } } as any;
+    it("should parse a bearer token", async () => {
+      const repo = {
+        metadata: { name: "foo", namespace: "default" },
+        spec: { auth: { header: { secretKeyRef: { name: "bar" } } } },
+      } as any;
       const secret = { data: { authorizationHeader: "QmVhcmVyIGZvbw==" } } as any;
-      const wrapper = mountWrapper(
-        defaultStore,
-        <AppRepoForm {...defaultProps} repo={repo} secret={secret} />,
-      );
-      expect(wrapper.find("#kubeapps-repo-token").prop("value")).toBe("foo");
+      AppRepository.getSecretForRepo = jest.fn(() => secret);
+
+      let wrapper: any;
+      act(() => {
+        wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
+      });
+
+      await waitFor(() => {
+        wrapper.update();
+        expect(wrapper.find("#kubeapps-repo-token").prop("value")).toBe("foo");
+      });
     });
 
-    it("should select a docker secret as auth mechanism", () => {
-      const repo = { metadata: { name: "foo" } } as any;
+    it("should select a docker secret as auth mechanism", async () => {
+      const repo = {
+        metadata: { name: "foo", namespace: "default" },
+        spec: { auth: { header: { secretKeyRef: { name: "bar" } } } },
+      } as any;
       const secret = { data: { ".dockerconfigjson": "QmVhcmVyIGZvbw==" } } as any;
-      const wrapper = mountWrapper(
-        defaultStore,
-        <AppRepoForm {...defaultProps} repo={repo} secret={secret} />,
-      );
-      expect(wrapper.find("#kubeapps-repo-auth-method-registry")).toBeChecked();
+      AppRepository.getSecretForRepo = jest.fn(() => secret);
+
+      let wrapper: any;
+      act(() => {
+        wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
+      });
+
+      await waitFor(() => {
+        wrapper.update();
+        expect(wrapper.find("#kubeapps-repo-auth-method-registry")).toBeChecked();
+      });
     });
 
-    it("should pre-select the existing docker registry secret", () => {
-      const secret = {
-        metadata: {
-          name: "foo",
-        },
-      } as ISecret;
-      const repo = { metadata: { name: "foo" }, spec: { dockerRegistrySecrets: ["foo"] } } as any;
-      const wrapper = mountWrapper(
-        getStore({
-          repos: { imagePullSecrets: [secret] },
-        }),
-        <AppRepoForm {...defaultProps} repo={repo} />,
+    it("should pre-select the existing docker registry secret", async () => {
+      const repo = {
+        metadata: { name: "foo" },
+        spec: { dockerRegistrySecrets: ["secret-2"] },
+      } as any;
+      Secret.getDockerConfigSecretNames = jest.fn(() =>
+        Promise.resolve(["secret-1", "secret-2", "secret-3"]),
       );
-      expect(wrapper.find("select").prop("value")).toBe("foo");
+      const wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
+      await waitFor(() => {
+        wrapper.update();
+        expect(wrapper.find("select").prop("value")).toBe("secret-2");
+      });
     });
 
-    it("should parse the existing filter (simple)", () => {
+    it("should parse the existing filter (simple)", async () => {
       const repo = {
         metadata: { name: "foo" },
         spec: {
@@ -610,12 +683,15 @@ describe("when the repository info is already populated", () => {
         },
       } as any;
       const wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
-      expect(wrapper.find("textarea").at(0).prop("value")).toBe("nginx, wordpress");
 
-      expect(wrapper.find('input[type="checkbox"]').at(0)).not.toBeChecked();
-      expect(wrapper.find('input[type="checkbox"]').at(1)).not.toBeChecked();
+      await waitFor(() => {
+        expect(wrapper.find("textarea").at(0).prop("value")).toBe("nginx, wordpress");
+        expect(wrapper.find('input[type="checkbox"]').at(0)).not.toBeChecked();
+        expect(wrapper.find('input[type="checkbox"]').at(1)).not.toBeChecked();
+      });
     });
-    it("should parse the existing filter (negated regex)", () => {
+
+    it("should parse the existing filter (negated regex)", async () => {
       const repo = {
         metadata: { name: "foo" },
         spec: {
@@ -624,10 +700,12 @@ describe("when the repository info is already populated", () => {
         },
       } as any;
       const wrapper = mountWrapper(defaultStore, <AppRepoForm {...defaultProps} repo={repo} />);
-      expect(wrapper.find("textarea").at(0).prop("value")).toBe("nginx");
 
-      expect(wrapper.find('input[type="checkbox"]').at(0)).toBeChecked();
-      expect(wrapper.find('input[type="checkbox"]').at(1)).toBeChecked();
+      await waitFor(() => {
+        expect(wrapper.find("textarea").at(0).prop("value")).toBe("nginx");
+        expect(wrapper.find('input[type="checkbox"]').at(0)).toBeChecked();
+        expect(wrapper.find('input[type="checkbox"]').at(1)).toBeChecked();
+      });
     });
   });
 });

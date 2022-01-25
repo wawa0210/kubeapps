@@ -1,18 +1,5 @@
-/*
-Copyright 2021 VMware. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package utils
 
@@ -23,7 +10,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/kubeapps/common/datastore"
 	"github.com/kubeapps/kubeapps/pkg/chart/models"
 	"github.com/kubeapps/kubeapps/pkg/dbutils"
 	_ "github.com/lib/pq"
@@ -39,8 +25,8 @@ type PostgresAssetManager struct {
 	dbutils.PostgresAssetManagerIface
 }
 
-func NewPGManager(config datastore.Config, kubeappsNamespace string) (AssetManager, error) {
-	m, err := dbutils.NewPGManager(config, kubeappsNamespace)
+func NewPGManager(config dbutils.Config, globalReposNamespace string) (AssetManager, error) {
+	m, err := dbutils.NewPGManager(config, globalReposNamespace)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +200,7 @@ func (m *PostgresAssetManager) GenerateWhereClause(cq ChartQuery) (string, []int
 	whereQuery := ""
 
 	if cq.Namespace != dbutils.AllNamespaces {
-		whereQueryParams = append(whereQueryParams, cq.Namespace, m.GetKubeappsNamespace())
+		whereQueryParams = append(whereQueryParams, cq.Namespace, m.GetGlobalReposNamespace())
 		whereClauses = append(whereClauses, fmt.Sprintf(
 			"(repo_namespace = $%d OR repo_namespace = $%d)", len(whereQueryParams)-1, len(whereQueryParams),
 		))

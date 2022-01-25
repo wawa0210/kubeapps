@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import actions from "actions";
 import AlertGroup from "components/AlertGroup";
 import Header from "components/Header";
@@ -16,14 +19,17 @@ function Layout({ children }: any) {
   const {
     auth: { authenticated },
     kube: { kindsError },
+    config: {
+      featureFlags: { operators },
+    },
     clusters,
   } = useSelector((state: IStoreState) => state);
 
   React.useEffect(() => {
-    if (authenticated && clusters.currentCluster) {
+    if (authenticated && clusters.currentCluster && operators) {
       dispatch(actions.kube.getResourceKinds(clusters.currentCluster));
     }
-  }, [dispatch, authenticated, clusters.currentCluster]);
+  }, [dispatch, authenticated, operators, clusters.currentCluster]);
 
   return (
     <section className="layout">

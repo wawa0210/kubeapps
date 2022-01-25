@@ -1,3 +1,6 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import Row from "components/js/Row";
 import { InstalledPackageSummary } from "gen/kubeappsapis/core/packages/v1alpha1/packages";
 import { Link } from "react-router-dom";
@@ -67,7 +70,7 @@ function AppListGrid(props: IAppListProps) {
           return (
             <CustomResourceListItem
               cluster={cluster}
-              key={r.metadata.name}
+              key={r.metadata.name + "_" + r.metadata.namespace}
               resource={r}
               csv={csv!}
             />

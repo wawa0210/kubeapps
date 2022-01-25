@@ -1,18 +1,5 @@
-/*
-Copyright 2021 VMware. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package server
 
@@ -51,12 +38,13 @@ var chartsList []*models.Chart
 var cc count
 
 const (
-	testChartReadme   = "# Quickstart\n\n```bash\nhelm install my-repo/my-chart\n```"
-	testChartValues   = "image:\n  registry: docker.io\n  repository: my-repo/my-chart\n  tag: 0.1.0"
-	testChartSchema   = `{"properties": {"type": "object"}}`
-	namespace         = "namespace"
-	kubeappsNamespace = "kubeapps-namespace"
-	testRepoName      = "my-repo"
+	testChartReadme      = "# Quickstart\n\n```bash\nhelm install my-repo/my-chart\n```"
+	testChartValues      = "image:\n  registry: docker.io\n  repository: my-repo/my-chart\n  tag: 0.1.0"
+	testChartSchema      = `{"properties": {"type": "object"}}`
+	namespace            = "namespace"
+	kubeappsNamespace    = "kubeapps-namespace"
+	globalReposNamespace = "kubeapps-repos-global"
+	testRepoName         = "my-repo"
 )
 
 var testRepo *models.Repo = &models.Repo{Name: testRepoName, Namespace: namespace}
@@ -77,7 +65,7 @@ func setMockManager(t *testing.T) (sqlmock.Sqlmock, func()) {
 	// TODO(absoludity): Let's not use globals for storing state like this.
 	origManager := manager
 
-	manager = &utils.PostgresAssetManager{&dbutils.PostgresAssetManager{DB: db, KubeappsNamespace: kubeappsNamespace}}
+	manager = &utils.PostgresAssetManager{&dbutils.PostgresAssetManager{DB: db, GlobalReposNamespace: globalReposNamespace}}
 
 	return mock, func() { db.Close(); manager = origManager }
 }
@@ -405,7 +393,7 @@ func Test_listCharts(t *testing.T) {
 				rows.AddRow(string(chartJSON))
 			}
 			mock.ExpectQuery("SELECT info FROM").
-				WithArgs(namespace, kubeappsNamespace).
+				WithArgs(namespace, globalReposNamespace).
 				WillReturnRows(rows)
 
 			mock.ExpectQuery("^SELECT count(.+) FROM").
@@ -528,7 +516,7 @@ func Test_listRepoCharts(t *testing.T) {
 				}
 				rows.AddRow(string(chartJSON))
 			}
-			expectedParams := []driver.Value{namespace, kubeappsNamespace}
+			expectedParams := []driver.Value{namespace, globalReposNamespace}
 			if tt.repo != "" {
 				expectedParams = append(expectedParams, tt.repo)
 			}
@@ -1353,20 +1341,20 @@ func Test_findLatestChart(t *testing.T) {
 				}
 			}
 			if tt.chartName != "" {
-				mockQuery.WithArgs(kubeappsNamespace, kubeappsNamespace, tt.chartName)
+				mockQuery.WithArgs(kubeappsNamespace, globalReposNamespace, tt.chartName)
 			}
 			if tt.version != "" && tt.appVersion != "" {
 				parametrizedJsonbLiteral := fmt.Sprintf(`[{"version":"%s","app_version":"%s"}]`, tt.version, tt.appVersion)
-				mockQuery.WithArgs(kubeappsNamespace, kubeappsNamespace, parametrizedJsonbLiteral)
+				mockQuery.WithArgs(kubeappsNamespace, globalReposNamespace, parametrizedJsonbLiteral)
 			}
 			if tt.repos != "" {
-				mockQuery.WithArgs(kubeappsNamespace, kubeappsNamespace, tt.repos)
+				mockQuery.WithArgs(kubeappsNamespace, globalReposNamespace, tt.repos)
 			}
 			if tt.categories != "" {
-				mockQuery.WithArgs(kubeappsNamespace, kubeappsNamespace, tt.categories)
+				mockQuery.WithArgs(kubeappsNamespace, globalReposNamespace, tt.categories)
 			}
 			if tt.query != "" {
-				mockQuery.WithArgs(kubeappsNamespace, kubeappsNamespace, "%"+tt.query+"%")
+				mockQuery.WithArgs(kubeappsNamespace, globalReposNamespace, "%"+tt.query+"%")
 			}
 
 			mockQuery.WillReturnRows(rows)

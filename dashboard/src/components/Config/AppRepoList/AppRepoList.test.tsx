@@ -1,3 +1,6 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import actions from "actions";
 import Alert from "components/js/Alert";
 import Table from "components/js/Table";
@@ -16,7 +19,7 @@ import { AppRepoRefreshAllButton } from "./AppRepoRefreshAllButton";
 
 const {
   clusters: { currentCluster, clusters },
-  config: { kubeappsNamespace },
+  config: { globalReposNamespace },
 } = initialState;
 const namespace = clusters[currentCluster].currentNamespace;
 
@@ -26,7 +29,6 @@ beforeEach(() => {
   actions.repos = {
     ...actions.repos,
     fetchRepos: jest.fn(),
-    fetchImagePullSecrets: jest.fn(),
   };
   const mockDispatch = jest.fn();
   spyOnUseDispatch = jest.spyOn(ReactRedux, "useDispatch").mockReturnValue(mockDispatch);
@@ -45,7 +47,7 @@ it("fetches repos and imagePullSecrets", () => {
   expect(actions.repos.fetchRepos).toHaveBeenCalledWith(namespace, true);
 });
 
-it("fetches repos only from the kubeappsNamespace", () => {
+it("fetches repos only from the globalReposNamespace", () => {
   mountWrapper(
     getStore({
       clusters: {
@@ -53,14 +55,14 @@ it("fetches repos only from the kubeappsNamespace", () => {
         clusters: {
           [currentCluster]: {
             ...initialState.clusters.clusters[currentCluster],
-            currentNamespace: kubeappsNamespace,
+            currentNamespace: globalReposNamespace,
           },
         },
       },
     }),
     <AppRepoList />,
   );
-  expect(actions.repos.fetchRepos).toHaveBeenCalledWith(kubeappsNamespace);
+  expect(actions.repos.fetchRepos).toHaveBeenCalledWith(globalReposNamespace);
 });
 
 it("fetches repos from all namespaces (without kubeappsNamespace)", () => {
@@ -128,7 +130,7 @@ describe("global and namespaced repositories", () => {
   const globalRepo = {
     metadata: {
       name: "bitnami",
-      namespace: kubeappsNamespace,
+      namespace: globalReposNamespace,
     },
     spec: {},
   };
@@ -155,7 +157,7 @@ describe("global and namespaced repositories", () => {
     ).toExist();
   });
 
-  it("shows the global repositories with the buttons disabled if the current user is not allowed to modify them", () => {
+  it("shows the global repositories with the buttons deactivated if the current user is not allowed to modify them", () => {
     Kube.canI = jest.fn().mockReturnValue({
       then: jest.fn((f: any) => f(false)),
     });
@@ -177,7 +179,7 @@ describe("global and namespaced repositories", () => {
       <AppRepoList />,
     );
     expect(wrapper.find(Table)).toHaveLength(1);
-    // The control buttons should be disabled
+    // The control buttons should be deactivated
     expect(wrapper.find(AppRepoDisabledControl)).toExist();
     expect(wrapper.find(AppRepoControl)).not.toExist();
     // The content related to namespaced repositories should exist
@@ -194,7 +196,7 @@ describe("global and namespaced repositories", () => {
           clusters: {
             [currentCluster]: {
               ...initialState.clusters.clusters[currentCluster],
-              currentNamespace: kubeappsNamespace,
+              currentNamespace: globalReposNamespace,
             },
           },
         },

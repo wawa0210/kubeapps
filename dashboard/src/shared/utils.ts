@@ -1,11 +1,12 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Plugin } from "gen/kubeappsapis/core/plugins/v1alpha1/plugins";
 import carvelIcon from "../icons/carvel.svg";
 import fluxIcon from "../icons/flux.svg";
 import helmIcon from "../icons/helm.svg";
 import olmIcon from "../icons/olm-icon.svg";
 import placeholder from "../placeholder.png";
-import ResourceRef from "./ResourceRef";
-import { IK8sList, IKubeItem, IResource, ISecret } from "./types";
 
 export enum PluginNames {
   PACKAGES_HELM = "helm.packages",
@@ -43,31 +44,6 @@ export function trimDescription(desc: string): string {
     return desc.substr(0, desc.lastIndexOf(" ", MAX_DESC_LENGTH)).concat("...");
   }
   return desc;
-}
-
-export function flattenResources(
-  refs: ResourceRef[],
-  resources: { [s: string]: IKubeItem<IResource | IK8sList<IResource, {}>> },
-) {
-  const result: Array<IKubeItem<IResource | ISecret>> = [];
-  refs.forEach(ref => {
-    const kubeItem = resources[ref.getResourceURL()];
-    if (kubeItem) {
-      const itemList = kubeItem.item as IK8sList<IResource | ISecret, {}>;
-      if (itemList && itemList.items) {
-        itemList.items.forEach(i => {
-          result.push({
-            isFetching: kubeItem.isFetching,
-            error: kubeItem.error,
-            item: i,
-          });
-        });
-      } else {
-        result.push(kubeItem as IKubeItem<IResource | ISecret>);
-      }
-    }
-  });
-  return result;
 }
 
 // Perhaps the logic of these functions should be provided by each plugin itself, namely:
@@ -151,4 +127,12 @@ export function getPluginPackageName(plugin?: Plugin | string) {
         return `${plugin?.name} package`;
     }
   }
+}
+
+export function getPluginsRequiringSA(): string[] {
+  return [PluginNames.PACKAGES_FLUX, PluginNames.PACKAGES_KAPP];
+}
+
+export function getPluginsSupportingRollback(): string[] {
+  return [PluginNames.PACKAGES_HELM];
 }

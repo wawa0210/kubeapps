@@ -1,3 +1,6 @@
+// Copyright 2019-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 package auth
 
 import (
@@ -6,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/kubeapps/common/response"
 	"github.com/kubeapps/kubeapps/pkg/dbutils"
 	"github.com/kubeapps/kubeapps/pkg/kube"
-	"github.com/urfave/negroni"
+	"github.com/kubeapps/kubeapps/pkg/response"
+	negroni "github.com/urfave/negroni/v2"
 )
 
 // tokenPrefix is the string preceding the token in the Authorization header.

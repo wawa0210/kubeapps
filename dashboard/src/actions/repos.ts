@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import {
   AvailablePackageReference,
   InstalledPackageDetail,
@@ -12,7 +15,6 @@ import {
   IAppRepository,
   IAppRepositoryFilter,
   IAppRepositoryKey,
-  ISecret,
   IStoreState,
   NotFoundError,
 } from "shared/types";
@@ -41,10 +43,6 @@ export const concatRepos = createAction("RECEIVE_REPOS", resolve => {
   return (repos: IAppRepository[]) => resolve(repos);
 });
 
-export const receiveReposSecret = createAction("RECEIVE_REPOS_SECRET", resolve => {
-  return (secret: ISecret) => resolve(secret);
-});
-
 export const requestRepo = createAction("REQUEST_REPO");
 export const receiveRepo = createAction("RECEIVE_REPO", resolve => {
   return (repo: IAppRepository) => resolve(repo);
@@ -65,15 +63,8 @@ export const errorRepos = createAction("ERROR_REPOS", resolve => {
     resolve({ err, op });
 });
 
-export const requestImagePullSecrets = createAction("REQUEST_IMAGE_PULL_SECRETS", resolve => {
-  return (namespace: string) => resolve(namespace);
-});
-export const receiveImagePullSecrets = createAction("RECEIVE_IMAGE_PULL_SECRETS", resolve => {
-  return (secrets: ISecret[]) => resolve(secrets);
-});
-
 export const createImagePullSecret = createAction("CREATE_IMAGE_PULL_SECRET", resolve => {
-  return (secret: ISecret) => resolve(secret);
+  return (secretName: string) => resolve(secretName);
 });
 
 const allActions = [
@@ -87,13 +78,10 @@ const allActions = [
   requestRepos,
   receiveRepo,
   receiveRepos,
-  receiveReposSecret,
   createErrorPackage,
   requestRepo,
   redirect,
   redirected,
-  requestImagePullSecrets,
-  receiveImagePullSecrets,
   createImagePullSecret,
 ];
 export type AppReposAction = ActionType<typeof allActions[number]>;
@@ -142,23 +130,6 @@ export const resyncAllRepos = (
   };
 };
 
-export const fetchRepoSecret = (
-  namespace: string,
-  name: string,
-): ThunkAction<Promise<void>, IStoreState, null, AppReposAction> => {
-  return async (dispatch, getState) => {
-    const {
-      clusters: { currentCluster },
-    } = getState();
-    try {
-      const secret = await Secret.get(currentCluster, namespace, name);
-      dispatch(receiveReposSecret(secret));
-    } catch (e: any) {
-      dispatch(errorRepos(e, "fetch"));
-    }
-  };
-};
-
 // fetchRepos fetches the AppRepositories in a specified namespace.
 export const fetchRepos = (
   namespace: string,
@@ -167,17 +138,18 @@ export const fetchRepos = (
   return async (dispatch, getState) => {
     const {
       clusters: { currentCluster },
-      config: { kubeappsNamespace },
+      config: { globalReposNamespace },
     } = getState();
     try {
       dispatch(requestRepos(namespace));
       const repos = await AppRepository.list(currentCluster, namespace);
-      if (!listGlobal || namespace === kubeappsNamespace) {
+      if (!listGlobal || namespace === globalReposNamespace) {
         dispatch(receiveRepos(repos.items));
       } else {
+        // Global repos need to be added
         let totalRepos = repos.items;
-        dispatch(requestRepos(kubeappsNamespace));
-        const globalRepos = await AppRepository.list(currentCluster, kubeappsNamespace);
+        dispatch(requestRepos(globalReposNamespace));
+        const globalRepos = await AppRepository.list(currentCluster, globalReposNamespace);
         // Avoid adding duplicated repos: if two repos have the same uid, filter out
         totalRepos = uniqBy(totalRepos.concat(globalRepos.items), "metadata.uid");
         dispatch(receiveRepos(totalRepos));
@@ -287,22 +259,6 @@ export const updateRepo = (
         filter,
       );
       dispatch(repoUpdated(data.appRepository));
-      // Re-fetch the helm repo secret that could have been modified with the updated headers
-      // so that if the user chooses to edit the app repo again, they will see the current value.
-      if (data.appRepository.spec?.auth) {
-        let secretName = "";
-        if (data.appRepository.spec.auth.header) {
-          secretName = data.appRepository.spec.auth.header.secretKeyRef.name;
-          dispatch(fetchRepoSecret(namespace, secretName));
-        }
-        if (
-          data.appRepository.spec.auth.customCA &&
-          secretName !== data.appRepository.spec.auth.customCA.secretKeyRef.name
-        ) {
-          secretName = data.appRepository.spec.auth.customCA.secretKeyRef.name;
-          dispatch(fetchRepoSecret(namespace, secretName));
-        }
-      }
       return true;
     } catch (e: any) {
       dispatch(errorRepos(e, "update"));
@@ -396,30 +352,6 @@ export function findPackageInRepo(
   };
 }
 
-export function fetchImagePullSecrets(
-  namespace: string,
-): ThunkAction<Promise<void>, IStoreState, null, AppReposAction> {
-  return async (dispatch, getState) => {
-    const {
-      clusters: { currentCluster },
-    } = getState();
-    try {
-      dispatch(requestImagePullSecrets(namespace));
-      // TODO(andresmgot): Create an endpoint for returning just the list of secret names
-      // to avoid listing all the secrets with protected information
-      // https://github.com/kubeapps/kubeapps/issues/1686
-      const secrets = await Secret.list(
-        currentCluster,
-        namespace,
-        "type=kubernetes.io/dockerconfigjson",
-      );
-      dispatch(receiveImagePullSecrets(secrets.items));
-    } catch (e: any) {
-      dispatch(errorRepos(e, "fetch"));
-    }
-  };
-}
-
 export function createDockerRegistrySecret(
   name: string,
   user: string,
@@ -433,16 +365,8 @@ export function createDockerRegistrySecret(
       clusters: { currentCluster },
     } = getState();
     try {
-      const secret = await Secret.createPullSecret(
-        currentCluster,
-        name,
-        user,
-        password,
-        email,
-        server,
-        namespace,
-      );
-      dispatch(createImagePullSecret(secret));
+      await Secret.createPullSecret(currentCluster, name, user, password, email, server, namespace);
+      dispatch(createImagePullSecret(name));
       return true;
     } catch (e: any) {
       dispatch(errorRepos(e, "fetch"));

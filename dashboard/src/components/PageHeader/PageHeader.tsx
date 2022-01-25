@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import Icon from "components/Icon/Icon";
 import Column from "components/js/Column";
 import Row from "components/js/Row";
@@ -29,7 +32,7 @@ function PageHeader({
     <header className="kubeapps-header">
       <div className="kubeapps-header-content">
         <Row>
-          <Column span={7}>
+          <Column>
             <div className="kubeapps-title-section">
               <div className="img-container">{icon && <Icon icon={icon} />}</div>
               <div className="kubeapps-title-block">
@@ -50,7 +53,7 @@ function PageHeader({
               {filter}
             </div>
           </Column>
-          <Column span={5}>
+          <Column>
             <div className="control-buttons">
               {version && <div className="header-version">{version}</div>}
               {buttons ? (

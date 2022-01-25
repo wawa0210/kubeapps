@@ -1,3 +1,6 @@
+// Copyright 2019-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 const { endpoint } = require("./args");
 const { setDefaultOptions } = require("expect-puppeteer");
 
@@ -17,4 +20,4 @@ global.endpoint = endpoint;
 global.getUrl = path => `${global.endpoint}${path}`;
 
 // Timeout for a test
-jest.setTimeout(120000);
+jest.setTimeout(160000);

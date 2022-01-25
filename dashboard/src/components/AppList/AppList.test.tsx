@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { deepClone } from "@cds/core/internal";
 import actions from "actions";
 import LoadingWrapper from "components/LoadingWrapper";
@@ -17,7 +20,7 @@ import qs from "qs";
 import React from "react";
 import { act } from "react-dom/test-utils";
 import * as ReactRedux from "react-redux";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter } from "react-router-dom";
 import { Kube } from "shared/Kube";
 import { defaultStore, getStore, initialState, mountWrapper } from "shared/specs/mountWrapper";
 import { FetchError, IStoreState } from "shared/types";
@@ -53,13 +56,29 @@ afterEach(() => {
 
 context("when changing props", () => {
   it("should fetch apps in the new namespace", async () => {
+    const state = deepClone(initialState) as IStoreState;
+    state.config.featureFlags = { operators: true };
+    const store = getStore(state);
     const fetchApps = jest.fn();
     const getCustomResources = jest.fn();
     actions.apps.fetchApps = fetchApps;
     actions.operators.getResources = getCustomResources;
-    mountWrapper(defaultStore, <AppList />);
+    mountWrapper(store, <AppList />);
     expect(fetchApps).toHaveBeenCalledWith("default-cluster", "default");
     expect(getCustomResources).toHaveBeenCalledWith("default-cluster", "default");
+  });
+
+  it("should not fetch resources in the new namespace when operators is deactivated", async () => {
+    const state = deepClone(initialState) as IStoreState;
+    state.config.featureFlags = { operators: false };
+    const store = getStore(state);
+    const fetchApps = jest.fn();
+    const getCustomResources = jest.fn();
+    actions.apps.fetchApps = fetchApps;
+    actions.operators.getResources = getCustomResources;
+    mountWrapper(store, <AppList />);
+    expect(fetchApps).toHaveBeenCalledWith("default-cluster", "default");
+    expect(getCustomResources).not.toHaveBeenCalled();
   });
 
   it("should update the search filter", () => {
@@ -89,11 +108,14 @@ context("when changing props", () => {
   });
 
   it("should fetch apps in all namespaces", async () => {
+    const state = deepClone(initialState) as IStoreState;
+    state.config.featureFlags = { operators: true };
+    const store = getStore(state);
     const fetchApps = jest.fn();
     const getCustomResources = jest.fn();
     actions.apps.fetchApps = fetchApps;
     actions.operators.getResources = getCustomResources;
-    const wrapper = mountWrapper(defaultStore, <AppList />);
+    const wrapper = mountWrapper(store, <AppList />);
     act(() => {
       wrapper.find("input[type='checkbox']").simulate("change");
     });
@@ -356,10 +378,14 @@ context("when apps available", () => {
 
 context("when custom resources available", () => {
   const state = deepClone(initialState) as IStoreState;
-  const cr = { kind: "KubeappsCluster", metadata: { name: "foo-cluster" } } as any;
+  const cr = {
+    kind: "KubeappsCluster",
+    metadata: { name: "foo-cluster", namespace: "foo-ns" },
+  } as any;
   const csv = {
     metadata: {
       name: "foo",
+      namespace: "foo-ns",
     },
     spec: {
       customresourcedefinitions: {
@@ -384,7 +410,7 @@ context("when custom resources available", () => {
     const wrapper = mountWrapper(getStore(state), <AppList />);
     const itemList = wrapper.find(CustomResourceListItem);
     expect(itemList).toExist();
-    expect(itemList.key()).toBe("foo-cluster");
+    expect(itemList.key()).toBe("foo-cluster_foo-ns");
   });
 
   it("filters out items", () => {

@@ -1,6 +1,17 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
+import {
+  InstalledPackageReference,
+  ResourceRef,
+} from "gen/kubeappsapis/core/packages/v1alpha1/packages";
+import {
+  GetServiceAccountNamesRequest,
+  GetServiceAccountNamesResponse,
+} from "gen/kubeappsapis/plugins/resources/v1alpha1/resources";
 import * as url from "shared/url";
-import { Auth } from "./Auth";
 import { axiosWithAuth } from "./AxiosInstance";
+import { KubeappsGrpcClient } from "./KubeappsGrpcClient";
 import { IK8sList, IKubeState, IResource } from "./types";
 
 export const APIBase = (cluster: string) => `api/clusters/${cluster}`;
@@ -15,6 +26,7 @@ if (window.location.protocol === "https:") {
 // ResourceRef to interact with a single API resource rather than using Kube
 // directly.
 export class Kube {
+  private static resourcesClient = () => new KubeappsGrpcClient().getResourcesServiceClientImpl();
   public static getResourceURL(
     cluster: string,
     apiVersion: string,
@@ -40,26 +52,6 @@ export class Kube {
     return u;
   }
 
-  public static watchResourceURL(
-    cluster: string,
-    apiVersion: string,
-    resource: string,
-    namespaced: boolean,
-    namespace?: string,
-    name?: string,
-    query?: string,
-  ) {
-    let u = this.getResourceURL(cluster, apiVersion, resource, namespaced, namespace);
-    u = `${WebSocketAPIBase}${u}?watch=true`;
-    if (name) {
-      u += `&fieldSelector=metadata.name%3D${name}`;
-    }
-    if (query) {
-      u += `&${query}`;
-    }
-    return u;
-  }
-
   public static async getResource(
     cluster: string,
     apiVersion: string,
@@ -75,23 +67,17 @@ export class Kube {
     return data;
   }
 
-  // Opens and returns a WebSocket for the requested resource. Note: it is
-  // important that this socket be properly closed when no longer needed. The
-  // returned WebSocket can be attached to an event listener to read data from
-  // the socket.
-  public static watchResource(
-    cluster: string,
-    apiVersion: string,
-    resource: string,
-    namespaced: boolean,
-    namespace?: string,
-    name?: string,
-    query?: string,
+  // getResources returns a subscription to an observable for resources from the server.
+  public static getResources(
+    pkgRef: InstalledPackageReference,
+    refs: ResourceRef[],
+    watch: boolean,
   ) {
-    return new WebSocket(
-      this.watchResourceURL(cluster, apiVersion, resource, namespaced, namespace, name, query),
-      Auth.wsProtocols(),
-    );
+    return this.resourcesClient().GetResources({
+      installedPackageRef: pkgRef,
+      resourceRefs: refs,
+      watch,
+    });
   }
 
   public static async getAPIGroups(cluster: string) {
@@ -137,6 +123,9 @@ export class Kube {
     namespace: string,
   ) {
     try {
+      if (!cluster) {
+        return false;
+      }
       const { data } = await axiosWithAuth.post<{ allowed: boolean }>(url.backend.canI(cluster), {
         group,
         resource,
@@ -147,5 +136,14 @@ export class Kube {
     } catch (e: any) {
       return false;
     }
+  }
+
+  public static async getServiceAccountNames(
+    cluster: string,
+    namespace: string,
+  ): Promise<GetServiceAccountNamesResponse> {
+    return await this.resourcesClient().GetServiceAccountNames({
+      context: { cluster, namespace },
+    } as GetServiceAccountNamesRequest);
   }
 }

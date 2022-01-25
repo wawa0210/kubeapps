@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { CdsToggle, CdsToggleGroup } from "@cds/react/toggle";
 import actions from "actions";
 import { filterNames, filtersToQuery } from "components/Catalog/Catalog";
@@ -9,8 +12,7 @@ import { push } from "connected-react-router";
 import qs from "qs";
 import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { useLocation } from "react-router";
-import { Link } from "react-router-dom";
+import { useLocation, Link } from "react-router-dom";
 import { Kube } from "shared/Kube";
 import { IAppRepository, IStoreState } from "shared/types";
 import { app } from "shared/url";
@@ -25,9 +27,9 @@ function AppRepoList() {
   const dispatch = useDispatch();
   const location = useLocation();
   const {
-    repos: { errors, isFetchingElem, repos, repoSecrets },
+    repos: { errors, isFetchingElem, repos },
     clusters: { clusters, currentCluster },
-    config: { kubeappsCluster, kubeappsNamespace },
+    config: { kubeappsCluster, kubeappsNamespace, globalReposNamespace },
   } = useSelector((state: IStoreState) => state);
   const cluster = currentCluster;
   const { currentNamespace } = clusters[cluster];
@@ -41,7 +43,7 @@ function AppRepoList() {
   // We do not currently support app repositories on additional clusters.
   const supportedCluster = cluster === kubeappsCluster;
   // useCallback stores the reference to the function, not the function execution
-  // so calling several times to refetchRepos would execute the code inside, even
+  // so calling several times to refetchRepos would run the code inside, even
   // if the dependencies do not change.
   const refetchRepos: () => void = useCallback(() => {
     if (!namespace) {
@@ -49,15 +51,15 @@ function AppRepoList() {
       dispatch(actions.repos.fetchRepos(""));
       return () => {};
     }
-    if (!supportedCluster || namespace === kubeappsNamespace) {
+    if (!supportedCluster || namespace === globalReposNamespace) {
       // Global namespace or other cluster, show global repos only
-      dispatch(actions.repos.fetchRepos(kubeappsNamespace));
+      dispatch(actions.repos.fetchRepos(globalReposNamespace));
       return () => {};
     }
     // In other case, fetch global and namespace repos
     dispatch(actions.repos.fetchRepos(namespace, true));
     return () => {};
-  }, [dispatch, supportedCluster, namespace, kubeappsNamespace]);
+  }, [dispatch, supportedCluster, namespace, globalReposNamespace]);
 
   useEffect(() => {
     refetchRepos();
@@ -86,15 +88,19 @@ function AppRepoList() {
     Kube.canI(cluster, "kubeapps.com", "apprepositories", "list", "").then(allowed =>
       setCanSetAllNS(allowed),
     );
-    Kube.canI(kubeappsCluster, "kubeapps.com", "apprepositories", "update", kubeappsNamespace).then(
-      allowed => setCanEditGlobalRepos(allowed),
-    );
-  }, [cluster, kubeappsCluster, kubeappsNamespace]);
+    Kube.canI(
+      kubeappsCluster,
+      "kubeapps.com",
+      "apprepositories",
+      "update",
+      globalReposNamespace,
+    ).then(allowed => setCanEditGlobalRepos(allowed));
+  }, [cluster, kubeappsCluster, kubeappsNamespace, globalReposNamespace]);
 
   const globalRepos: IAppRepository[] = [];
   const namespaceRepos: IAppRepository[] = [];
   repos.forEach(repo => {
-    repo.metadata.namespace === kubeappsNamespace
+    repo.metadata.namespace === globalReposNamespace
       ? globalRepos.push(repo)
       : namespaceRepos.push(repo);
   });
@@ -118,13 +124,8 @@ function AppRepoList() {
         ) : (
           <AppRepoControl
             repo={repo}
-            secret={repoSecrets.find(secret =>
-              secret.metadata.ownerReferences?.some(
-                ownerRef => ownerRef.name === repo.metadata.name,
-              ),
-            )}
             refetchRepos={refetchRepos}
-            kubeappsNamespace={kubeappsNamespace}
+            kubeappsNamespace={globalReposNamespace}
           />
         ),
       };
@@ -141,7 +142,7 @@ function AppRepoList() {
             title="Add an App Repository"
             key="add-repo-button"
             namespace={currentNamespace}
-            kubeappsNamespace={kubeappsNamespace}
+            kubeappsNamespace={globalReposNamespace}
           />,
           <AppRepoRefreshAllButton key="refresh-all-button" />,
         ]}
@@ -203,7 +204,7 @@ function AppRepoList() {
                 ) : (
                   <p>No global repositories found.</p>
                 )}
-                {namespace !== kubeappsNamespace && (
+                {namespace !== globalReposNamespace && (
                   <>
                     <h3>Namespace Repositories: {namespace}</h3>
                     <p>

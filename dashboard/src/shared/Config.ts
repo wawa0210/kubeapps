@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import axios from "axios";
 
 export enum SupportedThemes {
@@ -15,6 +18,7 @@ export interface ICustomAppViewIdentifier {
 export interface IConfig {
   kubeappsCluster: string;
   kubeappsNamespace: string;
+  globalReposNamespace: string;
   appVersion: string;
   authProxyEnabled: boolean;
   oauthLoginURI: string;
@@ -22,10 +26,15 @@ export interface IConfig {
   authProxySkipLoginPage: boolean;
   error?: Error;
   clusters: string[];
+  featureFlags: IFeatureFlags;
   theme: string;
   remoteComponentsUrl: string;
   customAppViews: ICustomAppViewIdentifier[];
   skipAvailablePackageDetails: boolean;
+}
+
+export interface IFeatureFlags {
+  operators: boolean;
 }
 
 export default class Config {
@@ -75,4 +84,5 @@ export default class Config {
   }
 
   private static APIEndpoint = "config.json";
+  public static OperatorsApi = "operators.coreos.com";
 }

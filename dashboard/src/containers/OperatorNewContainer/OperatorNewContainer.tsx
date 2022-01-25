@@ -1,3 +1,6 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { IOperatorNewProps } from "components/OperatorNew/OperatorNew";
 import { push } from "connected-react-router";
 import { connect } from "react-redux";
@@ -53,7 +56,7 @@ function mapDispatchToProps(dispatch: ThunkDispatch<IStoreState, null, Action>) 
         ),
       ),
     push: (location: string) => dispatch(push(location)),
-  } as IOperatorNewProps;
+  } as unknown as IOperatorNewProps;
 }
 
 export default connect(mapStateToProps, mapDispatchToProps)(OperatorNew);

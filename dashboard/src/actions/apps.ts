@@ -1,3 +1,6 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { JSONSchemaType } from "ajv";
 import {
   AvailablePackageDetail,
@@ -5,6 +8,7 @@ import {
   InstalledPackageDetail,
   InstalledPackageReference,
   InstalledPackageSummary,
+  ReconciliationOptions,
   ResourceRef,
   VersionReference,
 } from "gen/kubeappsapis/core/packages/v1alpha1/packages";
@@ -20,7 +24,7 @@ import {
   UnprocessableEntity,
   UpgradeError,
 } from "shared/types";
-import { PluginNames } from "shared/utils";
+import { getPluginsSupportingRollback } from "shared/utils";
 import { ActionType, deprecated } from "typesafe-actions";
 import { App } from "../shared/App";
 import { validate } from "../shared/schema";
@@ -158,7 +162,13 @@ export function fetchApps(
       dispatch(receiveAppList(installedPackageSummaries));
       return installedPackageSummaries;
     } catch (e: any) {
-      dispatch(errorApp(new FetchError(e.message)));
+      dispatch(
+        errorApp(
+          e instanceof Error
+            ? new FetchError("Unable to list apps", [e])
+            : new FetchError("Unable to list apps: " + e.message),
+        ),
+      );
       return [];
     }
   };
@@ -171,6 +181,7 @@ export function installPackage(
   releaseName: string,
   values?: string,
   schema?: JSONSchemaType<any>,
+  reconciliationOptions?: ReconciliationOptions,
 ): ThunkAction<Promise<boolean>, IStoreState, null, AppsAction> {
   return async dispatch => {
     dispatch(requestInstallPackage());
@@ -196,6 +207,7 @@ export function installPackage(
           availablePackageDetail.availablePackageRef,
           { version: availablePackageDetail.version.pkgVersion } as VersionReference,
           values,
+          reconciliationOptions as ReconciliationOptions,
         );
         dispatch(receiveInstallPackage());
         return true;
@@ -263,7 +275,10 @@ export function rollbackInstalledPackage(
 ): ThunkAction<Promise<boolean>, IStoreState, null, AppsAction> {
   return async dispatch => {
     // rollbackInstalledPackage is currently only available for Helm packages
-    if (installedPackageRef?.plugin?.name === PluginNames.PACKAGES_HELM) {
+    if (
+      installedPackageRef?.plugin?.name &&
+      getPluginsSupportingRollback().includes(installedPackageRef.plugin.name)
+    ) {
       dispatch(requestRollbackInstalledPackage());
       try {
         await App.RollbackInstalledPackage(installedPackageRef, revision);

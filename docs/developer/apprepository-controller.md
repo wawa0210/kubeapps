@@ -2,6 +2,25 @@
 
 The `apprepository-controller` is a Kubernetes controller for managing Helm chart repositories added to Kubeapps.
 
+An AppRepository resource looks like this:
+
+```
+apiVersion: v1
+items:
+apiVersion: kubeapps.com/v1alpha1
+kind: AppRepository
+metadata:
+  name: bitnami
+spec:
+  url: https://charts.bitnami.com/incubator
+  type: helm
+```
+
+This controller will monitor resources of the above type and create [Kubernetes CronJobs](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) to schedule the repository to be synced to the database. This is a  component of Kubeapps and is intended to be used with it.
+
+Based off the [Kubernetes Sample Controller](https://github.com/kubernetes/sample-controller).
+
+
 ## Prerequisites
 
 - [Git](https://git-scm.com/)
@@ -48,7 +67,7 @@ kubectl -n kubeapps scale deployment kubeapps-internal-apprepository-controller 
 
 > **NOTE** Remember to scale the deployment back to `1` replica when you are done
 
-You can now execute the `apprepository-controller` binary on the developer host with:
+You can now run the `apprepository-controller` binary on the developer host with:
 
 ```bash
 ./apprepository-controller --repo-sync-image=docker.io/kubeapps/asset-syncer:myver --kubeconfig ~/.kube/config
@@ -58,7 +77,7 @@ Performing application repository actions in the Kubeapps dashboard will now tri
 
 ### Running tests
 
-To start the tests on the `apprepository-controller` execute the following command:
+To start the tests on the `apprepository-controller` run the following command:
 
 ```bash
 go test

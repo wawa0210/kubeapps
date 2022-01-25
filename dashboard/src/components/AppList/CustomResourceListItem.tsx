@@ -1,3 +1,6 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { findOwnedKind, getIcon } from "shared/Operators";
 import { IClusterServiceVersion, IResource } from "shared/types";
 import { app } from "shared/url";
@@ -25,7 +28,7 @@ function CustomResourceListItem(props: ICustomResourceListItemProps) {
   const icon = getIcon(csv);
   return (
     <InfoCard
-      key={resource.metadata.name}
+      key={resource.metadata.name + "_" + resource.metadata.namespace}
       link={app.operatorInstances.view(
         cluster,
         resource.metadata.namespace,
@@ -40,6 +43,7 @@ function CustomResourceListItem(props: ICustomResourceListItemProps) {
         <>
           <div>App: {resource.kind}</div>
           <div>Operator: {csv.spec.version || "-"}</div>
+          <div>Namespace: {resource.metadata.namespace || "-"}</div>
         </>
       }
       bgIcon={getPluginIcon("operator")}

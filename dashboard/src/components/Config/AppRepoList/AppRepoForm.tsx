@@ -1,3 +1,6 @@
+// Copyright 2019-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { CdsButton } from "@cds/react/button";
 import { CdsCheckbox } from "@cds/react/checkbox";
 import { CdsControlMessage, CdsFormGroup } from "@cds/react/forms";
@@ -7,11 +10,13 @@ import { CdsTextarea } from "@cds/react/textarea";
 import actions from "actions";
 import Alert from "components/js/Alert";
 import * as yaml from "js-yaml";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Action } from "redux";
 import { ThunkDispatch } from "redux-thunk";
+import { AppRepository } from "shared/AppRepository";
 import { toFilterRule, toParams } from "shared/jq";
+import Secret from "shared/Secret";
 import { IAppRepository, IAppRepositoryFilter, ISecret, IStoreState } from "shared/types";
 import AppRepoAddDockerCreds from "./AppRepoAddDockerCreds";
 import "./AppRepoForm.css";
@@ -35,7 +40,6 @@ interface IAppRepoFormProps {
   namespace: string;
   kubeappsNamespace: string;
   repo?: IAppRepository;
-  secret?: ISecret;
 }
 
 const AUTH_METHOD_NONE = "none";
@@ -48,7 +52,8 @@ const TYPE_HELM = "helm";
 const TYPE_OCI = "oci";
 
 export function AppRepoForm(props: IAppRepoFormProps) {
-  const { onSubmit, onAfterInstall, namespace, kubeappsNamespace, repo, secret } = props;
+  const { onSubmit, onAfterInstall, namespace, kubeappsNamespace, repo } = props;
+  const isInstallingRef = useRef(false);
   const dispatch: ThunkDispatch<IStoreState, null, Action> = useDispatch();
 
   const [authMethod, setAuthMethod] = useState(AUTH_METHOD_NONE);
@@ -68,31 +73,36 @@ export function AppRepoForm(props: IAppRepoFormProps) {
   const [filterNames, setFilterNames] = useState("");
   const [filterRegex, setFilterRegex] = useState(false);
   const [filterExclude, setFilterExclude] = useState(false);
+  const [secret, setSecret] = useState<ISecret>();
   const [selectedImagePullSecret, setSelectedImagePullSecret] = useState("");
+  const [imagePullSecrets, setImagePullSecrets] = useState<string[]>([]);
   const [validated, setValidated] = useState(undefined as undefined | boolean);
-
-  useEffect(() => {
-    dispatch(actions.repos.fetchImagePullSecrets(namespace));
-  }, [dispatch, namespace]);
 
   const {
     repos: {
-      imagePullSecrets,
       errors: { create: createError, update: updateError, validate: validationError },
       validating,
     },
     config: { appVersion },
+    clusters: { currentCluster },
   } = useSelector((state: IStoreState) => state);
 
   useEffect(() => {
+    fetchImagePullSecrets(currentCluster, namespace);
+  }, [dispatch, namespace, currentCluster]);
+
+  async function fetchImagePullSecrets(cluster: string, repoNamespace: string) {
+    setImagePullSecrets(await Secret.getDockerConfigSecretNames(cluster, repoNamespace));
+  }
+
+  useEffect(() => {
     // Select the pull secrets if they are already selected in the existing repo
-    imagePullSecrets.forEach(pullSecret => {
-      const secretName = pullSecret.metadata.name;
+    imagePullSecrets.forEach(secretName => {
       if (repo?.spec?.dockerRegistrySecrets?.some(s => s === secretName)) {
         setSelectedImagePullSecret(secretName);
       }
     });
-  }, [imagePullSecrets, repo, selectedImagePullSecret]);
+  }, [imagePullSecrets, repo]);
 
   useEffect(() => {
     if (repo) {
@@ -112,27 +122,25 @@ export function AppRepoForm(props: IAppRepoFormProps) {
         setFilterExclude(exclude);
         setFilterNames(names);
       }
+
       if (repo.spec?.auth?.customCA || repo.spec?.auth?.header) {
-        const secrets = [];
-        if (repo.spec?.auth?.customCA) {
-          secrets.push(repo.spec.auth.customCA.secretKeyRef.name);
-        }
-        if (repo.spec?.auth?.header && !secrets.includes(repo.spec.auth.header.secretKeyRef.name)) {
-          secrets.push(repo.spec.auth.header.secretKeyRef.name);
-        }
-        secrets.forEach(s => dispatch(actions.repos.fetchRepoSecret(namespace, s)));
+        fetchRepoSecret(currentCluster, repo.metadata.namespace, repo.metadata.name);
       }
     }
-  }, [repo, namespace, dispatch]);
+  }, [repo, namespace, currentCluster, dispatch]);
+
+  async function fetchRepoSecret(cluster: string, repoNamespace: string, repoName: string) {
+    setSecret(await AppRepository.getSecretForRepo(cluster, repoNamespace, repoName));
+  }
 
   useEffect(() => {
     if (secret) {
       if (secret.data["ca.crt"]) {
-        setCustomCA(atob(secret.data["ca.crt"]));
+        setCustomCA(Buffer.from(secret.data["ca.crt"], "base64").toString());
       }
       if (secret.data.authorizationHeader) {
         if (authHeader.startsWith("Basic")) {
-          const userPass = atob(authHeader.split(" ")[1]).split(":");
+          const userPass = Buffer.from(authHeader.split(" ")[1], "base64").toString().split(":");
           setUser(userPass[0]);
           setPassword(userPass[1]);
           setAuthMethod(AUTH_METHOD_BASIC);
@@ -141,7 +149,7 @@ export function AppRepoForm(props: IAppRepoFormProps) {
           setAuthMethod(AUTH_METHOD_BEARER);
         } else {
           setAuthMethod(AUTH_METHOD_CUSTOM);
-          setAuthHeader(atob(secret.data.authorizationHeader));
+          setAuthHeader(Buffer.from(secret.data.authorizationHeader, "base64").toString());
         }
       }
       if (secret.data[".dockerconfigjson"]) {
@@ -156,6 +164,11 @@ export function AppRepoForm(props: IAppRepoFormProps) {
   };
 
   const install = async () => {
+    if (isInstallingRef.current) {
+      // Another installation is ongoing
+      return;
+    }
+    isInstallingRef.current = true;
     let finalHeader = "";
     let dockerRegCreds = "";
     switch (authMethod) {
@@ -163,7 +176,7 @@ export function AppRepoForm(props: IAppRepoFormProps) {
         finalHeader = authHeader;
         break;
       case AUTH_METHOD_BASIC:
-        finalHeader = `Basic ${btoa(`${user}:${password}`)}`;
+        finalHeader = `Basic ${Buffer.from(`${user}:${password}`).toString("base64")}`;
         break;
       case AUTH_METHOD_BEARER:
         finalHeader = `Bearer ${token}`;
@@ -217,6 +230,7 @@ export function AppRepoForm(props: IAppRepoFormProps) {
         onAfterInstall();
       }
     }
+    isInstallingRef.current = false;
   };
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value);
@@ -620,7 +634,7 @@ export function AppRepoForm(props: IAppRepoFormProps) {
         </Alert>
       )}
       <div className="margin-t-xl">
-        <CdsButton disabled={validating} onClick={install}>
+        <CdsButton type="submit" disabled={validating}>
           {validating
             ? "Validating..."
             : `${repo ? "Update" : "Install"} Repo ${validated === false ? "(force)" : ""}`}

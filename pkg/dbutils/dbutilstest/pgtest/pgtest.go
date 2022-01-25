@@ -1,18 +1,5 @@
-/*
-Copyright (c) 2020 Bitnami
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package pgtest
 
@@ -21,7 +8,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/kubeapps/common/datastore"
 	"github.com/kubeapps/kubeapps/pkg/chart/models"
 	"github.com/kubeapps/kubeapps/pkg/dbutils"
 	"github.com/kubeapps/kubeapps/pkg/dbutils/dbutilstest"
@@ -39,7 +25,7 @@ func SkipIfNoDB(t *testing.T) {
 }
 
 func openTestManager(t *testing.T) *dbutils.PostgresAssetManager {
-	pam, err := dbutils.NewPGManager(datastore.Config{
+	pam, err := dbutils.NewPGManager(dbutils.Config{
 		URL:      "localhost:5432",
 		Database: "testdb",
 		Username: "postgres",

@@ -1,3 +1,6 @@
+// Copyright 2019-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 package handler
 
 import (
@@ -7,15 +10,15 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/kubeapps/common/response"
 	"github.com/kubeapps/kubeapps/pkg/agent"
 	"github.com/kubeapps/kubeapps/pkg/auth"
 	"github.com/kubeapps/kubeapps/pkg/chart"
 	chartUtils "github.com/kubeapps/kubeapps/pkg/chart"
 	"github.com/kubeapps/kubeapps/pkg/handlerutil"
 	"github.com/kubeapps/kubeapps/pkg/kube"
+	"github.com/kubeapps/kubeapps/pkg/response"
 	log "github.com/sirupsen/logrus"
-	"github.com/urfave/negroni"
+	negroni "github.com/urfave/negroni/v2"
 	"helm.sh/helm/v3/pkg/action"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -181,7 +184,7 @@ func CreateRelease(cfg Config, w http.ResponseWriter, req *http.Request, params 
 		return
 	}
 	// TODO: currently app repositories are only supported on the cluster on which Kubeapps is installed. #1982
-	appRepo, caCertSecret, authSecret, err := chart.GetAppRepoAndRelatedSecrets(chartDetails.AppRepositoryResourceName, chartDetails.AppRepositoryResourceNamespace, cfg.KubeHandler, cfg.Token, cfg.Options.ClustersConfig.KubeappsClusterName, cfg.Options.KubeappsNamespace, cfg.Options.ClustersConfig.KubeappsClusterName)
+	appRepo, caCertSecret, authSecret, err := chart.GetAppRepoAndRelatedSecrets(chartDetails.AppRepositoryResourceName, chartDetails.AppRepositoryResourceNamespace, cfg.KubeHandler, cfg.Token, cfg.Options.ClustersConfig.KubeappsClusterName, cfg.Options.ClustersConfig.GlobalReposNamespace, cfg.Options.ClustersConfig.KubeappsClusterName)
 	if err != nil {
 		returnErrMessage(fmt.Errorf("unable to get app repository %q: %v", chartDetails.AppRepositoryResourceName, err), w)
 		return

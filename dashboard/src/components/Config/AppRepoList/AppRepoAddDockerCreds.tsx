@@ -1,3 +1,6 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { CdsControlMessage } from "@cds/react/forms";
 import { CdsInput } from "@cds/react/input";
 import { CdsSelect } from "@cds/react/select";
@@ -7,11 +10,11 @@ import { useEffect, useState } from "react";
 import { useDispatch } from "react-redux";
 import { Action } from "redux";
 import { ThunkDispatch } from "redux-thunk";
-import { ISecret, IStoreState } from "shared/types";
+import { IStoreState } from "shared/types";
 import "./AppRepoAddDockerCreds.css";
 
 interface IAppRepoFormProps {
-  imagePullSecrets: ISecret[];
+  imagePullSecrets: string[];
   selectPullSecret: (imagePullSecret: string) => void;
   selectedImagePullSecret: string;
   namespace: string;
@@ -70,9 +73,7 @@ export function AppRepoAddDockerCreds({
     if (success) {
       // Re-fetching secrets cause a re-render and the modal to be closed,
       // using local state to avoid that.
-      setCurrentImagePullSecrets(
-        currentImagePullSecrets.concat({ metadata: { name: secretName, namespace } } as ISecret),
-      );
+      setCurrentImagePullSecrets(currentImagePullSecrets.concat(secretName));
       setUser("");
       setSecretName("");
       setPassword("");
@@ -101,7 +102,7 @@ export function AppRepoAddDockerCreds({
               <a
                 target="_blank"
                 rel="noreferrer"
-                href="https://github.com/kubeapps/kubeapps/blob/master/docs/user/private-app-repository.md#associating-docker-image-pull-secrets-to-an-apprepository"
+                href="https://github.com/kubeapps/kubeapps/blob/main/docs/user/private-app-repository.md#associating-docker-image-pull-secrets-to-an-apprepository"
               >
                 here
               </a>
@@ -132,8 +133,8 @@ export function AppRepoAddDockerCreds({
           disabled={disabled}
         >
           <option />
-          {currentImagePullSecrets.map(secret => {
-            return <option key={`option-${secret.metadata.name}`}>{secret.metadata.name}</option>;
+          {currentImagePullSecrets.map(secretName => {
+            return <option key={`option-${secretName}`}>{secretName}</option>;
           })}
         </select>
       </CdsSelect>

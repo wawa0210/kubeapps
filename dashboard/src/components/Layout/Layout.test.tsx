@@ -1,3 +1,6 @@
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import actions from "actions";
 import * as ReactRedux from "react-redux";
 import { getStore, mountWrapper } from "shared/specs/mountWrapper";
@@ -33,7 +36,23 @@ const defaultState = {
   auth: { authenticated: true },
 };
 
-it("fetch resource kinds", () => {
-  mountWrapper(getStore(defaultState), <Layout />);
+it("fetches resource kinds when operators enabled", () => {
+  const state = {
+    ...defaultState,
+    config: {
+      featureFlags: {
+        operators: true,
+      },
+    },
+  };
+
+  mountWrapper(getStore(state), <Layout />);
+
   expect(actions.kube.getResourceKinds).toHaveBeenCalled();
+});
+
+it("does not fetch resource kinds when operators disaabled", () => {
+  mountWrapper(getStore(defaultState), <Layout />);
+
+  expect(actions.kube.getResourceKinds).not.toHaveBeenCalled();
 });

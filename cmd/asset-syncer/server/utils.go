@@ -1,18 +1,5 @@
-/*
-Copyright 2021 VMware. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package server
 
@@ -39,9 +26,9 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/ghodss/yaml"
 	"github.com/itchyny/gojq"
-	"github.com/kubeapps/common/datastore"
 	apprepov1alpha1 "github.com/kubeapps/kubeapps/cmd/apprepository-controller/pkg/apis/apprepository/v1alpha1"
 	"github.com/kubeapps/kubeapps/pkg/chart/models"
+	"github.com/kubeapps/kubeapps/pkg/dbutils"
 	"github.com/kubeapps/kubeapps/pkg/helm"
 	httpclient "github.com/kubeapps/kubeapps/pkg/http-client"
 	"github.com/kubeapps/kubeapps/pkg/tarutil"
@@ -69,6 +56,7 @@ type Config struct {
 	FilterRules           string
 	PassCredentials       bool
 	UserAgent             string
+	GlobalReposNamespace  string
 	KubeappsNamespace     string
 	AuthorizationHeader   string
 	DockerConfigJson      string
@@ -119,8 +107,8 @@ type assetManager interface {
 	insertFiles(chartID string, files models.ChartFiles) error
 }
 
-func newManager(config datastore.Config, kubeappsNamespace string) (assetManager, error) {
-	return newPGManager(config, kubeappsNamespace)
+func newManager(config dbutils.Config, globalReposNamespace string) (assetManager, error) {
+	return newPGManager(config, globalReposNamespace)
 }
 
 func getSha256(src []byte) (string, error) {
@@ -198,6 +186,27 @@ func satisfy(chartInput map[string]interface{}, code *gojq.Code, vars []interfac
 	return satisfied, nil
 }
 
+// Make sure charts are treated without escaped data
+func unescapeChartsData(charts []models.Chart) []models.Chart {
+	result := []models.Chart{}
+	for _, chart := range charts {
+		chart.Name = unescapeOrDefaultValue(chart.Name)
+		chart.ID = unescapeOrDefaultValue(chart.ID)
+		result = append(result, chart)
+	}
+	return result
+}
+
+// Unescape string or return value itself if error
+func unescapeOrDefaultValue(value string) string {
+	unescapedValue, err := url.PathUnescape(value)
+	if err != nil {
+		return value
+	} else {
+		return unescapedValue
+	}
+}
+
 func filterCharts(charts []models.Chart, filterRule *apprepov1alpha1.FilterRuleSpec) ([]models.Chart, error) {
 	if filterRule == nil || filterRule.JQ == "" {
 		// No filter
@@ -248,7 +257,7 @@ func (r *HelmRepo) Charts(fetchLatestOnly bool) ([]models.Chart, error) {
 		return []models.Chart{}, fmt.Errorf("no charts in repository index")
 	}
 
-	return filterCharts(charts, r.filter)
+	return filterCharts(unescapeChartsData(charts), r.filter)
 }
 
 // FetchFiles retrieves the important files of a chart and version from the repo
@@ -260,7 +269,7 @@ func (r *HelmRepo) FetchFiles(name string, cv models.ChartVersion, userAgent str
 		authorizationHeader = r.AuthorizationHeader
 	}
 
-	return tarutil.FetchChartDetailFromTarball(
+	return tarutil.FetchChartDetailFromTarballUrl(
 		name,
 		chartTarballURL,
 		userAgent,
@@ -269,7 +278,7 @@ func (r *HelmRepo) FetchFiles(name string, cv models.ChartVersion, userAgent str
 }
 
 // TagList represents a list of tags as specified at
-// https://github.com/opencontainers/distribution-spec/blob/master/spec.md#content-discovery
+// https://github.com/opencontainers/distribution-spec/blob/main/spec.md#content-discovery
 type TagList struct {
 	Name string   `json:"name"`
 	Tags []string `json:"tags"`

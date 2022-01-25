@@ -1,18 +1,5 @@
-/*
-Copyright 2021 VMware. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
 
 package server
 
@@ -23,19 +10,20 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/heptiolabs/healthcheck"
-	"github.com/kubeapps/common/datastore"
 	"github.com/kubeapps/kubeapps/cmd/assetsvc/pkg/utils"
-	"github.com/urfave/negroni"
+	"github.com/kubeapps/kubeapps/pkg/dbutils"
+	negroni "github.com/urfave/negroni/v2"
 	log "k8s.io/klog/v2"
 )
 
 type ServeOptions struct {
-	Manager           utils.AssetManager
-	DbURL             string
-	DbName            string
-	DbUsername        string
-	DbPassword        string
-	KubeappsNamespace string
+	Manager              utils.AssetManager
+	DbURL                string
+	DbName               string
+	DbUsername           string
+	DbPassword           string
+	KubeappsNamespace    string
+	GlobalReposNamespace string
 }
 
 // TODO(absoludity): Let's not use globals for storing state like this.
@@ -75,10 +63,10 @@ func setupRoutes() http.Handler {
 }
 
 func Serve(serveOpts ServeOptions) error {
-	dbConfig := datastore.Config{URL: *&serveOpts.DbURL, Database: *&serveOpts.DbName, Username: *&serveOpts.DbUsername, Password: serveOpts.DbPassword}
+	dbConfig := dbutils.Config{URL: *&serveOpts.DbURL, Database: *&serveOpts.DbName, Username: *&serveOpts.DbUsername, Password: serveOpts.DbPassword}
 
 	var err error
-	manager, err = utils.NewManager("postgresql", dbConfig, serveOpts.KubeappsNamespace)
+	manager, err = utils.NewManager("postgresql", dbConfig, serveOpts.GlobalReposNamespace)
 	if err != nil {
 		return fmt.Errorf("Error: %v", err)
 	}

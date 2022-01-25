@@ -1,3 +1,6 @@
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { grpc } from "@improbable-eng/grpc-web";
 import { FakeTransportBuilder } from "@improbable-eng/grpc-web-fake-transport";
 import { KubeappsGrpcClient } from "./KubeappsGrpcClient";
@@ -88,4 +91,46 @@ describe("kubeapps grpc core plugin service", () => {
 
   // TODO(agamez): try to also mock the messages ussing the new FakeTransportBuilder().withMessages([])
   // More details: https://github.com/kubeapps/kubeapps/issues/3165#issuecomment-882944035
+});
+
+describe("kubeapps grpc resources plugin service", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const fakeAuthTransport = new FakeTransportBuilder()
+    .withHeaders(new grpc.Metadata({ authorization: "Bearer topsecret" }))
+    .build();
+
+  it("it set the metadata if using token auth", async () => {
+    const kubeappsGrpcClient = new KubeappsGrpcClient(fakeAuthTransport);
+    jest.spyOn(window.localStorage.__proto__, "getItem").mockReturnValue("topsecret");
+
+    const getClientMetadataMock = jest.spyOn(KubeappsGrpcClient.prototype, "getClientMetadata");
+    kubeappsGrpcClient.getResourcesServiceClientImpl();
+
+    const expectedMetadata = new grpc.Metadata({ authorization: "Bearer topsecret" });
+    expect(getClientMetadataMock.mock.results[0].value).toEqual(expectedMetadata);
+  });
+
+  it("it doesn't set the metadata if not using token auth", async () => {
+    const kubeappsGrpcClient = new KubeappsGrpcClient(fakeAuthTransport);
+    jest.spyOn(window.localStorage.__proto__, "getItem").mockReturnValue(null);
+    const getClientMetadataMock = jest.spyOn(KubeappsGrpcClient.prototype, "getClientMetadata");
+
+    kubeappsGrpcClient.getResourcesServiceClientImpl();
+
+    expect(getClientMetadataMock.mock.results[0].value).toBeUndefined();
+  });
+
+  it("it sets the metadata if passed an explicit token", async () => {
+    const kubeappsGrpcClient = new KubeappsGrpcClient(fakeAuthTransport);
+    jest.spyOn(window.localStorage.__proto__, "getItem").mockReturnValue(null);
+    const getClientMetadataMock = jest.spyOn(KubeappsGrpcClient.prototype, "getClientMetadata");
+
+    kubeappsGrpcClient.getResourcesServiceClientImpl("topsecret");
+
+    const expectedMetadata = new grpc.Metadata({ authorization: "Bearer topsecret" });
+    expect(getClientMetadataMock.mock.results[0].value).toEqual(expectedMetadata);
+  });
 });

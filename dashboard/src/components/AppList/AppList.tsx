@@ -1,14 +1,17 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { CdsButton } from "@cds/react/button";
 import { CdsIcon } from "@cds/react/icon";
 import { CdsToggle, CdsToggleGroup } from "@cds/react/toggle";
 import actions from "actions";
-import Alert from "components/js/Alert";
+import ErrorAlert from "components/ErrorAlert";
 import LoadingWrapper from "components/LoadingWrapper/LoadingWrapper";
 import { push } from "connected-react-router";
 import qs from "qs";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import * as ReactRouter from "react-router";
+import * as ReactRouter from "react-router-dom";
 import { Link } from "react-router-dom";
 import { Kube } from "shared/Kube";
 import { IStoreState } from "shared/types";
@@ -28,7 +31,7 @@ function AppList() {
     apps: { error, isFetching, listOverview },
     clusters: { clusters, currentCluster },
     operators: { isFetching: isFetchingResources, resources: customResources, csvs },
-    config: { appVersion },
+    config: { appVersion, featureFlags },
   } = useSelector((state: IStoreState) => state);
   const cluster = currentCluster;
   const { currentNamespace } = clusters[cluster];
@@ -70,8 +73,10 @@ function AppList() {
 
   useEffect(() => {
     dispatch(actions.apps.fetchApps(cluster, namespace));
-    dispatch(actions.operators.getResources(cluster, namespace));
-  }, [dispatch, cluster, namespace]);
+    if (featureFlags?.operators) {
+      dispatch(actions.operators.getResources(cluster, namespace));
+    }
+  }, [dispatch, cluster, namespace, featureFlags]);
 
   useEffect(() => {
     // In order to be able to list applications in all namespaces, it's necessary to be able
@@ -129,7 +134,7 @@ function AppList() {
         className="margin-t-xl"
       >
         {error ? (
-          <Alert theme="danger">Unable to list apps: {error.message}</Alert>
+          <ErrorAlert>{error}</ErrorAlert>
         ) : (
           <AppListGrid
             appList={listOverview}

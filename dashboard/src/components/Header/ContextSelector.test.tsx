@@ -1,3 +1,6 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { CdsButton } from "@cds/react/button";
 import { CdsModal } from "@cds/react/modal";
 import actions from "actions";
@@ -7,7 +10,7 @@ import { cloneDeep } from "lodash";
 import { act } from "react-dom/test-utils";
 import * as ReactRedux from "react-redux";
 import * as ReactRouter from "react-router";
-import { Router } from "react-router";
+import { Router } from "react-router-dom";
 import { IClustersState } from "reducers/cluster";
 import { defaultStore, getStore, initialState, mountWrapper } from "shared/specs/mountWrapper";
 import ContextSelector from "./ContextSelector";
@@ -19,7 +22,7 @@ beforeEach(() => {
   actions.namespace = {
     ...actions.namespace,
     fetchNamespaces: jest.fn(),
-    getNamespace: jest.fn(),
+    checkNamespaceExists: jest.fn(),
     setNamespace: jest.fn(),
     createNamespace: jest.fn(),
   };
@@ -37,11 +40,11 @@ afterEach(() => {
 });
 
 it("gets a namespace", () => {
-  const getNamespace = jest.fn();
-  actions.namespace.getNamespace = getNamespace;
+  const checkNamespaceExists = jest.fn();
+  actions.namespace.checkNamespaceExists = checkNamespaceExists;
   mountWrapper(defaultStore, <ContextSelector />);
 
-  expect(getNamespace).toHaveBeenCalledWith(
+  expect(checkNamespaceExists).toHaveBeenCalledWith(
     initialState.clusters.currentCluster,
     initialState.clusters.clusters[initialState.clusters.currentCluster].currentNamespace,
   );

@@ -1,3 +1,6 @@
+// Copyright 2019-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { CdsIcon } from "@cds/react/icon";
 import isSomeResourceLoading from "components/AppView/helpers";
 import LoadingWrapper from "components/LoadingWrapper/LoadingWrapper";
@@ -50,10 +53,11 @@ function codeToString(status: InstalledPackageStatus | null | undefined) {
     [InstalledPackageStatus_StatusReason.STATUS_REASON_PENDING]: "Pending",
     [InstalledPackageStatus_StatusReason.UNRECOGNIZED]: "Unknown",
   };
+  let msg = codes[0];
   if (status && status.reason) {
-    return codes[status.reason];
+    msg = codes[status.reason];
   }
-  return codes[0];
+  return `${msg}${status?.userReason ? " (" + status.userReason + ")" : ""}`;
 }
 
 export default function ApplicationStatus({

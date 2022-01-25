@@ -1,3 +1,6 @@
+// Copyright 2019-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 .description {
   display: block;
   color: var(--cds-global-typography-color-300, #454545);
@@ -28,6 +31,11 @@
 
 .basic-deployment-form-param {
   padding: 0.6rem 0;
+}
+
+.deployment-form {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
 }
 
 .deployment-form-label {

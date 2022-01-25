@@ -1,3 +1,6 @@
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 const axios = require("axios");
 const utils = require("./lib/utils");
 const testName = "02-create-private-registry";
@@ -93,24 +96,37 @@ test("Creates a private registry", async () => {
   );
 
   // Now that the deployment has been created, we check that the imagePullSecret
-  // has been added. For doing so, we query the kubernetes API to get info of the
+  // has been added. For doing so, we query the resources API to get info of the
   // deployment
-  const URL = getUrl("/api/clusters/default/apis/apps/v1/namespaces/default/deployments");
+  const URL = getUrl(
+    `/apis/plugins/resources/v1alpha1/helm.packages/v1alpha1/c/default/ns/default/${appName}`,
+  );
 
   const cookies = await page.cookies();
   const axiosConfig = {
     headers: {
-      Authorization: `${token}`,
+      Authorization: `Bearer ${token}`,
       Cookie: `${cookies[0] ? cookies[0].name : ""}=${cookies[0] ? cookies[0].value : ""}`,
     },
   };
   const response = await axios.get(URL, axiosConfig);
   expect(response.status).toEqual(200);
 
-  const deployment = response.data.items.find(deployment => {
-    return deployment.metadata.name.match(appName);
-  });
-  expect(deployment.spec.template.spec.imagePullSecrets).toEqual([{ name: secret }]);
+  let deployment;
+  response.data
+    .trim()
+    .split(/\r?\n/)
+    .forEach(r => {
+      // Axios doesn't provide streaming responses, so splitting on new line works
+      // but gives us a string, not JSON, and may leave a blank line at the end.
+      const response = JSON.parse(r);
+      const resourceRef = response.result?.resourceRef;
+      if (resourceRef.kind === "Deployment" && resourceRef.name.match(appName)) {
+        deployment = JSON.parse(response.result?.manifest);
+      }
+    });
+
+  expect(deployment?.spec?.template?.spec?.imagePullSecrets).toEqual([{ name: secret }]);
 
   // Upgrade apache and verify.
   await expect(page).toClick("cds-button", { text: "Upgrade" });
@@ -120,7 +136,7 @@ test("Creates a private registry", async () => {
     await new Promise(r => setTimeout(r, 500));
 
     packagehartVersionElement = await expect(page).toMatchElement(
-      '.upgrade-form-version-selector select[name="package-versions"]',
+      'select[name="package-versions"]',
     );
     packagehartVersionElementContent = await packageVersionElement.getProperty("value");
     packagehartVersionValue = await packageVersionElementContent.jsonValue();
@@ -136,17 +152,12 @@ test("Creates a private registry", async () => {
   // but going back to the previous version
   await new Promise(r => setTimeout(r, 1000));
 
-  await expect(page).toSelect(
-    '.upgrade-form-version-selector select[name="package-versions"]',
-    "8.6.3",
-  );
+  await expect(page).toSelect('select[name="package-versions"]', "8.6.3");
 
   await new Promise(r => setTimeout(r, 1000));
 
   // Ensure that the new value is selected
-  packageVersionElement = await expect(page).toMatchElement(
-    '.upgrade-form-version-selector select[name="package-versions"]',
-  );
+  packageVersionElement = await expect(page).toMatchElement('select[name="package-versions"]');
   packageVersionElementContent = await packageVersionElement.getProperty("value");
   packageVersionValue = await packageVersionElementContent.jsonValue();
   expect(packageVersionValue).toEqual("8.6.3");

@@ -1,9 +1,11 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { LOCATION_CHANGE, RouterActionType, RouterLocation } from "connected-react-router";
 import { Location } from "history";
 import context from "jest-plugin-context";
 import { Auth } from "shared/Auth";
 import { IConfig } from "shared/Config";
-import { IResource } from "shared/types";
 import { getType } from "typesafe-actions";
 import actions from "../actions";
 import clusterReducer, { IClustersState, initialState } from "./cluster";
@@ -179,10 +181,10 @@ describe("clusterReducer", () => {
             },
           } as IClustersState,
           {
-            type: getType(actions.namespace.receiveNamespace),
+            type: getType(actions.namespace.receiveNamespaceExists),
             payload: {
               cluster: "other",
-              namespace: { metadata: { name: "bar" } } as IResource,
+              namespace: "bar",
             },
           },
         ),
@@ -436,6 +438,7 @@ describe("clusterReducer", () => {
     const config = {
       kubeappsCluster: "",
       kubeappsNamespace: "kubeapps",
+      globalReposNamespace: "kubeapps-global",
       appVersion: "dev",
       authProxyEnabled: false,
       oauthLoginURI: "",

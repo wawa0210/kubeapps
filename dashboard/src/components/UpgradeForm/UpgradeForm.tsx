@@ -1,3 +1,7 @@
+// Copyright 2018-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
+import { CdsFormGroup } from "@cds/react/forms";
 import actions from "actions";
 import AvailablePackageDetailExcerpt from "components/Catalog/AvailablePackageDetailExcerpt";
 import Alert from "components/js/Alert";
@@ -17,7 +21,6 @@ import { IStoreState } from "../../shared/types";
 import * as url from "../../shared/url";
 import DeploymentFormBody from "../DeploymentFormBody/DeploymentFormBody";
 import LoadingWrapper from "../LoadingWrapper/LoadingWrapper";
-import "./UpgradeForm.css";
 
 export interface IUpgradeFormProps {
   version?: string;
@@ -64,7 +67,7 @@ function UpgradeForm(props: IUpgradeFormProps) {
   const [valuesModified, setValuesModified] = useState(false);
 
   useEffect(() => {
-    // This block just will be executed once, given that populating
+    // This block just will be run once, given that populating
     // the list of versions does not depend on anything else
     if (selectedPackage.versions.length === 0) {
       dispatch(
@@ -102,7 +105,7 @@ function UpgradeForm(props: IUpgradeFormProps) {
   useEffect(() => {
     if (installedAppAvailablePackageDetail?.defaultValues && !modifications) {
       // Calculate modifications from the default values
-      const defaultValuesObj = yaml.load(installedAppAvailablePackageDetail?.defaultValues);
+      const defaultValuesObj = yaml.load(installedAppAvailablePackageDetail?.defaultValues) || {};
       const deployedValuesObj = yaml.load(installedAppInstalledPackageDetail?.valuesApplied || "");
       const newModifications = jsonpatch.compare(defaultValuesObj as any, deployedValuesObj as any);
       const values = applyModifications(
@@ -202,6 +205,7 @@ function UpgradeForm(props: IUpgradeFormProps) {
               onSelect={selectVersion}
               currentVersion={installedAppAvailablePackageDetail?.version?.pkgVersion}
               selectedVersion={pkgVersion}
+              hideVersionsSelector={true}
             />
             <LoadingWrapper
               loaded={
@@ -219,10 +223,11 @@ function UpgradeForm(props: IUpgradeFormProps) {
                     </Column>
                     <Column span={9}>
                       <form onSubmit={handleDeploy}>
-                        <div className="upgrade-form-version-selector">
-                          <label className="centered deployment-form-label deployment-form-label-text-param">
-                            Upgrade to Version
-                          </label>
+                        <CdsFormGroup
+                          className="deployment-form"
+                          layout="vertical"
+                          controlWidth="shrink"
+                        >
                           <PackageVersionSelector
                             versions={versions}
                             selectedVersion={pkgVersion}
@@ -230,8 +235,10 @@ function UpgradeForm(props: IUpgradeFormProps) {
                             currentVersion={
                               installedAppInstalledPackageDetail?.currentVersion?.pkgVersion
                             }
+                            label={"Package Version"}
+                            message={"Select the version this package will be upgraded to."}
                           />
-                        </div>
+                        </CdsFormGroup>
                         <DeploymentFormBody
                           deploymentEvent="upgrade"
                           packageId={

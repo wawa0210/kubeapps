@@ -1,15 +1,6 @@
-/*
-Copyright © 2021 VMware
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-    http://www.apache.org/licenses/LICENSE-2.0
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 package tarutil
 
 import (
@@ -30,7 +21,7 @@ import (
 //
 // name is expected in format "foo/bar" or "foo%2Fbar" if url-escaped
 //
-func FetchChartDetailFromTarball(name string, chartTarballURL string, userAgent string, authz string, netClient httpclient.Client) (map[string]string, error) {
+func FetchChartDetailFromTarballUrl(name string, chartTarballURL string, userAgent string, authz string, netClient httpclient.Client) (map[string]string, error) {
 	reqHeaders := make(map[string]string)
 	if len(userAgent) > 0 {
 		reqHeaders["User-Agent"] = userAgent
@@ -49,6 +40,15 @@ func FetchChartDetailFromTarball(name string, chartTarballURL string, userAgent 
 		return nil, err
 	}
 
+	return FetchChartDetailFromTarball(reader, name)
+}
+
+//
+// Fetches helm chart details from a gzipped tarball
+//
+// name is expected in format "foo/bar" or "foo%2Fbar" if url-escaped
+//
+func FetchChartDetailFromTarball(reader io.Reader, name string) (map[string]string, error) {
 	// We read the whole chart into memory, this should be okay since the chart
 	// tarball needs to be small enough to fit into a GRPC call (Tiller
 	// requirement)

@@ -1,3 +1,6 @@
+// Copyright 2020-2022 the Kubeapps contributors.
+// SPDX-License-Identifier: Apache-2.0
+
 import { get } from "lodash";
 import { ThunkAction } from "redux-thunk";
 import { Operators } from "shared/Operators";
@@ -321,7 +324,7 @@ export function getResources(
         try {
           const csvResources = await Operators.listResources(
             cluster,
-            namespace,
+            csv.metadata.namespace,
             `${group}/${crd.version}`,
             plural,
           );
