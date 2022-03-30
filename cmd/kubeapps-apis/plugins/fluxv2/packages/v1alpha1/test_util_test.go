@@ -4,24 +4,28 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"reflect"
 	"testing"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2beta1"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
 	"github.com/google/go-cmp/cmp"
 	corev1 "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/packages/v1alpha1"
 	plugins "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/plugins/v1alpha1"
-	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/plugins/fluxv2/packages/v1alpha1"
-	k8scorev1 "k8s.io/api/core/v1"
+	apiv1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 const KubeappsCluster = "default"
@@ -44,7 +48,7 @@ func (w *withWatchWrapper) Get(ctx context.Context, key client.ObjectKey, obj cl
 func (w *withWatchWrapper) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
 	if err := w.delegate.List(ctx, list, opts...); err != nil {
 		return err
-	} else if accessor, err := meta.ListAccessor(list); err != nil {
+	} else if accessor, err := apimeta.ListAccessor(list); err != nil {
 		return err
 	} else {
 		accessor.SetResourceVersion("1")
@@ -64,7 +68,7 @@ func (w *withWatchWrapper) Patch(ctx context.Context, obj client.Object, patch c
 	return w.delegate.Patch(ctx, obj, patch, opts...)
 }
 
-func (w *withWatchWrapper) RESTMapper() meta.RESTMapper {
+func (w *withWatchWrapper) RESTMapper() apimeta.RESTMapper {
 	return w.delegate.RESTMapper()
 }
 
@@ -99,16 +103,17 @@ func lessAvailablePackageFunc(p1, p2 *corev1.AvailablePackageSummary) bool {
 	return p1.DisplayName < p2.DisplayName
 }
 
-func lessPackageRepositoryFunc(p1, p2 *v1alpha1.PackageRepository) bool {
-	return p1.Name < p2.Name && p1.Namespace < p2.Namespace
-}
-
 // these are helpers to compare slices ignoring order
 func lessInstalledPackageSummaryFunc(p1, p2 *corev1.InstalledPackageSummary) bool {
 	return p1.Name < p2.Name
 }
 
-func compareJSON(t *testing.T, expectedJSON, actualJSON *v1.JSON) {
+// these are helpers to compare slices ignoring order
+func lessPackageRepositorySummaryFunc(p1, p2 *corev1.PackageRepositorySummary) bool {
+	return p1.Name < p2.Name
+}
+
+func compareJSON(t *testing.T, expectedJSON, actualJSON *apiextv1.JSON) {
 	expectedJSONString, actualJSONString := "", ""
 	if expectedJSON != nil {
 		expectedJSONString = string(expectedJSON.Raw)
@@ -146,6 +151,19 @@ func compareJSONStrings(t *testing.T, expectedJSONString, actualJSONString strin
 	}
 }
 
+// generate-cert.sh script in testdata directory is used to generate these files
+func getCertsForTesting(t *testing.T) (ca, pub, priv []byte) {
+	var err error
+	if ca, err = ioutil.ReadFile(testCert("ca.pem")); err != nil {
+		t.Fatalf("%+v", err)
+	} else if pub, err = ioutil.ReadFile(testCert("server.pem")); err != nil {
+		t.Fatalf("%+v", err)
+	} else if priv, err = ioutil.ReadFile(testCert("server-key.pem")); err != nil {
+		t.Fatalf("%+v", err)
+	}
+	return ca, pub, priv
+}
+
 // ref: https://stackoverflow.com/questions/21936332/idiomatic-way-of-requiring-http-basic-auth-in-go
 func basicAuth(handler http.HandlerFunc, username, password, realm string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -161,13 +179,13 @@ func basicAuth(handler http.HandlerFunc, username, password, realm string) http.
 }
 
 // ref: https://kubernetes.io/docs/concepts/configuration/secret/#basic-authentication-secret
-func newBasicAuthSecret(name, namespace, user, password string) *k8scorev1.Secret {
-	return &k8scorev1.Secret{
+func newBasicAuthSecret(name, namespace, user, password string) *apiv1.Secret {
+	return &apiv1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Type: k8scorev1.SecretTypeOpaque,
+		Type: apiv1.SecretTypeOpaque,
 		Data: map[string][]byte{
 			"username": []byte(user),
 			"password": []byte(password),
@@ -180,36 +198,70 @@ func newBasicAuthSecret(name, namespace, user, password string) *k8scorev1.Secre
 // https://fluxcd.io/docs/components/source/helmrepositories/#spec-examples they expect TLS secrets
 // in a different format:
 // certFile/keyFile/caFile vs tls.crt/tls.key. I am going with flux's example for now:
-func newTlsSecret(name, namespace string, pub, priv, ca []byte) (*k8scorev1.Secret, error) {
-	return &k8scorev1.Secret{
+func newTlsSecret(name, namespace string, pub, priv, ca []byte) *apiv1.Secret {
+	s := &apiv1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Type: k8scorev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			"certFile": pub,
-			"keyFile":  priv,
-			"caFile":   ca,
-		},
-	}, nil
+		Type: apiv1.SecretTypeOpaque,
+		Data: map[string][]byte{},
+	}
+	if pub != nil {
+		s.Data["certFile"] = pub
+	}
+	if priv != nil {
+		s.Data["keyFile"] = priv
+	}
+	if ca != nil {
+		s.Data["caFile"] = ca
+	}
+	return s
 }
 
-func newBasicAuthTlsSecret(name, namespace, user, password string, pub, priv, ca []byte) (*k8scorev1.Secret, error) {
-	return &k8scorev1.Secret{
+func newBasicAuthTlsSecret(name, namespace, user, password string, pub, priv, ca []byte) *apiv1.Secret {
+	s := &apiv1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Type: k8scorev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			"username": []byte(user),
-			"password": []byte(password),
-			"certFile": pub,
-			"keyFile":  priv,
-			"caFile":   ca,
+		Type: apiv1.SecretTypeOpaque,
+		Data: map[string][]byte{},
+	}
+	if pub != nil {
+		s.Data["certFile"] = pub
+	}
+	if priv != nil {
+		s.Data["keyFile"] = priv
+	}
+	if ca != nil {
+		s.Data["caFile"] = ca
+	}
+	if user != "" {
+		s.Data["username"] = []byte(user)
+	}
+	if password != "" {
+		s.Data["password"] = []byte(password)
+	}
+	return s
+}
+
+func newDockerConfigJSONSecret(name, namespace, server, username, password, email string) *apiv1.Secret {
+	// ref https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+	authStr := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", username, password)))
+	configStr := fmt.Sprintf("{\"auths\":{\"%s\":{\"username\":\"%s\",\"password\":\"%s\",\"email\":\"%s\",\"auth\":\"%s\"}}}",
+		server, username, password, email, authStr)
+	s := &apiv1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
 		},
-	}, nil
+		Type: apiv1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{
+			".dockerconfigjson": []byte(base64.StdEncoding.EncodeToString([]byte(configStr))),
+		},
+	}
+	return s
 }
 
 func availableRef(id, namespace string) *corev1.AvailablePackageReference {
@@ -234,22 +286,89 @@ func installedRef(id, namespace string) *corev1.InstalledPackageReference {
 	}
 }
 
+func newCtrlClient(repos []sourcev1.HelmRepository, charts []sourcev1.HelmChart, releases []helmv2.HelmRelease) withWatchWrapper {
+	// register the flux GitOps Toolkit schema definitions
+	scheme := runtime.NewScheme()
+	sourcev1.AddToScheme(scheme)
+	helmv2.AddToScheme(scheme)
+
+	rm := apimeta.NewDefaultRESTMapper([]schema.GroupVersion{sourcev1.GroupVersion, helmv2.GroupVersion})
+	rm.Add(schema.GroupVersionKind{
+		Group:   sourcev1.GroupVersion.Group,
+		Version: sourcev1.GroupVersion.Version,
+		Kind:    sourcev1.HelmRepositoryKind},
+		apimeta.RESTScopeNamespace)
+	rm.Add(schema.GroupVersionKind{
+		Group:   sourcev1.GroupVersion.Group,
+		Version: sourcev1.GroupVersion.Version,
+		Kind:    sourcev1.HelmChartKind},
+		apimeta.RESTScopeNamespace)
+	rm.Add(schema.GroupVersionKind{
+		Group:   helmv2.GroupVersion.Group,
+		Version: helmv2.GroupVersion.Version,
+		Kind:    helmv2.HelmReleaseKind},
+		apimeta.RESTScopeNamespace)
+
+	ctrlClientBuilder := ctrlfake.NewClientBuilder().WithScheme(scheme).WithRESTMapper(rm)
+	initLists := []client.ObjectList{}
+	if len(repos) > 0 {
+		initLists = append(initLists, &sourcev1.HelmRepositoryList{Items: repos})
+	}
+	if len(charts) > 0 {
+		initLists = append(initLists, &sourcev1.HelmChartList{Items: charts})
+	}
+	if len(releases) > 0 {
+		initLists = append(initLists, &helmv2.HelmReleaseList{Items: releases})
+	}
+	if len(initLists) > 0 {
+		ctrlClientBuilder = ctrlClientBuilder.WithLists(initLists...)
+	}
+	return withWatchWrapper{delegate: ctrlClientBuilder.Build()}
+}
+
+func ctrlClientAndWatcher(t *testing.T, s *Server) (client.WithWatch, *watch.RaceFreeFakeWatcher, error) {
+	ctx := context.Background()
+	if ctrlClient, err := s.clientGetter.ControllerRuntime(ctx, s.kubeappsCluster); err != nil {
+		return nil, nil, err
+	} else if ww, ok := ctrlClient.(*withWatchWrapper); !ok {
+		return nil, nil, fmt.Errorf("Could not cast %s to: *withWatchWrapper", reflect.TypeOf(ctrlClient))
+	} else if watcher := ww.watcher; watcher == nil {
+		return nil, nil, fmt.Errorf("Unexpected condition watcher is nil")
+	} else {
+		return ctrlClient, watcher, nil
+	}
+}
+
+func testTgz(name string) string {
+	return "./testdata/charts/" + name
+}
+
+func testYaml(name string) string {
+	return "./testdata/charts/" + name
+}
+
+func testCert(name string) string {
+	return "./testdata/cert/" + name
+}
+
 // misc global vars that get re-used in multiple tests
-var fluxPlugin = &plugins.Plugin{Name: "fluxv2.packages", Version: "v1alpha1"}
-var fluxHelmRepositoryCRD = &apiextv1.CustomResourceDefinition{
-	TypeMeta: metav1.TypeMeta{
-		Kind:       "CustomResourceDefinition",
-		APIVersion: "apiextensions.k8s.io/v1",
-	},
-	ObjectMeta: metav1.ObjectMeta{
-		Name: "helmrepositories.source.toolkit.fluxcd.io",
-	},
-	Status: apiextv1.CustomResourceDefinitionStatus{
-		Conditions: []apiextv1.CustomResourceDefinitionCondition{
-			{
-				Type:   "Established",
-				Status: "True",
+var (
+	fluxPlugin            = &plugins.Plugin{Name: "fluxv2.packages", Version: "v1alpha1"}
+	fluxHelmRepositoryCRD = &apiextv1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "CustomResourceDefinition",
+			APIVersion: "apiextensions.k8s.io/v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "helmrepositories.source.toolkit.fluxcd.io",
+		},
+		Status: apiextv1.CustomResourceDefinitionStatus{
+			Conditions: []apiextv1.CustomResourceDefinitionCondition{
+				{
+					Type:   "Established",
+					Status: apiextv1.ConditionStatus(metav1.ConditionTrue),
+				},
 			},
 		},
-	},
-}
+	}
+)

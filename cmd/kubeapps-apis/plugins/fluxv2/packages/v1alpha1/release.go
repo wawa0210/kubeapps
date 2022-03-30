@@ -11,7 +11,8 @@ import (
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2beta1"
-	sourcev1 "github.com/fluxcd/source-controller/api/v1beta1"
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
 	corev1 "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/packages/v1alpha1"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/fluxv2/packages/v1alpha1/common"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/pkgutils"
@@ -24,7 +25,6 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/storage/driver"
-	apiv1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -87,18 +87,6 @@ func (s *Server) paginatedInstalledPkgSummaries(ctx context.Context, namespace s
 
 	installedPkgSummaries := []*corev1.InstalledPackageSummary{}
 	if len(releasesFromCluster) > 0 {
-		// we're going to need this later
-		// TODO (gfichtenholt) for now we get all charts and later find one that helmrelease is using
-		// there is probably a more efficient way to do this
-
-		// TODO (gfichtenholt) how do we ensure that for several calls in succession
-		// we don't return the same result? After all we can't guarantee the order in which
-		// s.listReleasesInCluster will return the results when invoked multiple times in a row
-		chartsFromCluster, err := s.listChartsInCluster(ctx, apiv1.NamespaceAll)
-		if err != nil {
-			return nil, err
-		}
-
 		startAt := -1
 		if pageSize > 0 {
 			startAt = int(pageSize) * pageOffset
@@ -106,7 +94,7 @@ func (s *Server) paginatedInstalledPkgSummaries(ctx context.Context, namespace s
 
 		for i, r := range releasesFromCluster {
 			if startAt <= i {
-				summary, err := s.installedPkgSummaryFromRelease(ctx, r, chartsFromCluster)
+				summary, err := s.installedPkgSummaryFromRelease(ctx, r)
 				if err != nil {
 					return nil, err
 				} else if summary == nil {
@@ -123,9 +111,9 @@ func (s *Server) paginatedInstalledPkgSummaries(ctx context.Context, namespace s
 	return installedPkgSummaries, nil
 }
 
-func (s *Server) installedPkgSummaryFromRelease(ctx context.Context, rel helmv2.HelmRelease, chartsFromCluster []sourcev1.HelmChart) (*corev1.InstalledPackageSummary, error) {
+func (s *Server) installedPkgSummaryFromRelease(ctx context.Context, rel helmv2.HelmRelease) (*corev1.InstalledPackageSummary, error) {
 	// first check if release CR is ready or is in "flux"
-	if !common.CheckGeneration(&rel) {
+	if !checkReleaseGeneration(rel) {
 		return nil, nil
 	}
 
@@ -196,7 +184,7 @@ func (s *Server) installedPkgSummaryFromRelease(ctx context.Context, rel helmv2.
 	repo := types.NamespacedName{Namespace: repoNamespace, Name: repoName}
 	chartFromCache, err := s.getChart(ctx, repo, chartName)
 	if err != nil {
-		return nil, err
+		log.Warningf("%v", err)
 	} else if chartFromCache != nil && len(chartFromCache.ChartVersions) > 0 {
 		// charts in cache are already sorted with the latest being at position 0
 		latestPkgVersion = &corev1.PackageAppVersion{
@@ -353,7 +341,17 @@ func (s *Server) newRelease(ctx context.Context, packageRef *corev1.AvailablePac
 		}
 	}
 
-	fluxRelease, err := s.newFluxHelmRelease(chart, targetName, versionRef, reconcile, values)
+	// Calculate the version constraints
+	versionExpr := versionRef.GetVersion()
+	if versionExpr != "" {
+		versionExpr, err = pkgutils.VersionConstraintWithUpgradePolicy(
+			versionRef.GetVersion(), s.pluginConfig.DefaultUpgradePolicy)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	fluxRelease, err := s.newFluxHelmRelease(chart, targetName, versionExpr, reconcile, values)
 	if err != nil {
 		return nil, err
 	}
@@ -388,8 +386,14 @@ func (s *Server) updateRelease(ctx context.Context, packageRef *corev1.Installed
 		return nil, err
 	}
 
-	if versionRef.GetVersion() != "" {
-		rel.Spec.Chart.Spec.Version = versionRef.GetVersion()
+	versionExpr := versionRef.GetVersion()
+	if versionExpr != "" {
+		versionExpr, err = pkgutils.VersionConstraintWithUpgradePolicy(
+			versionRef.GetVersion(), s.pluginConfig.DefaultUpgradePolicy)
+		if err != nil {
+			return nil, err
+		}
+		rel.Spec.Chart.Spec.Version = versionExpr
 	} else {
 		rel.Spec.Chart.Spec.Version = ""
 	}
@@ -485,7 +489,7 @@ func (s *Server) deleteRelease(ctx context.Context, packageRef *corev1.Installed
 // 2. metadata.namespace, where this HelmRelease CRD will exist, same as (3) below
 //    per https://github.com/kubeapps/kubeapps/pull/3640#issuecomment-949315105
 // 3. spec.targetNamespace, where flux will install any artifacts from the release
-func (s *Server) newFluxHelmRelease(chart *models.Chart, targetName types.NamespacedName, versionRef *corev1.VersionReference, reconcile *corev1.ReconciliationOptions, values map[string]interface{}) (*helmv2.HelmRelease, error) {
+func (s *Server) newFluxHelmRelease(chart *models.Chart, targetName types.NamespacedName, versionExpr string, reconcile *corev1.ReconciliationOptions, values map[string]interface{}) (*helmv2.HelmRelease, error) {
 	fluxRelease := &helmv2.HelmRelease{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       helmv2.HelmReleaseKind,
@@ -508,8 +512,8 @@ func (s *Server) newFluxHelmRelease(chart *models.Chart, targetName types.Namesp
 			},
 		},
 	}
-	if versionRef.GetVersion() != "" {
-		fluxRelease.Spec.Chart.Spec.Version = versionRef.GetVersion()
+	if versionExpr != "" {
+		fluxRelease.Spec.Chart.Spec.Version = versionExpr
 	}
 
 	reconcileInterval := defaultReconcileInterval // unless explicitly specified
@@ -538,8 +542,8 @@ func (s *Server) newFluxHelmRelease(chart *models.Chart, targetName types.Namesp
 	// So far we just use one configured per server/installation, if specified,
 	// same as helm plug-in.
 	// Otherwise the default timeout is used.
-	if s.timeoutSeconds > 0 {
-		timeoutInterval := metav1.Duration{Duration: time.Duration(s.timeoutSeconds) * time.Second}
+	if s.pluginConfig.TimeoutSeconds > 0 {
+		timeoutInterval := metav1.Duration{Duration: time.Duration(s.pluginConfig.TimeoutSeconds) * time.Second}
 		fluxRelease.Spec.Timeout = &timeoutInterval
 	}
 	return fluxRelease, nil
@@ -561,12 +565,12 @@ func (s *Server) newFluxHelmRelease(chart *models.Chart, targetName types.Namesp
 //       otherwise pending or unspecified when there are no status conditions to go by
 //
 func isHelmReleaseReady(rel helmv2.HelmRelease) (ready bool, status corev1.InstalledPackageStatus_StatusReason, userReason string) {
-	if !common.CheckGeneration(&rel) {
+	if !checkReleaseGeneration(rel) {
 		return false, corev1.InstalledPackageStatus_STATUS_REASON_UNSPECIFIED, ""
 	}
 
 	isInstallFailed := false
-	readyCond := meta.FindStatusCondition(*rel.GetStatusConditions(), "Ready")
+	readyCond := meta.FindStatusCondition(rel.GetConditions(), fluxmeta.ReadyCondition)
 	if readyCond != nil {
 		if readyCond.Reason != "" {
 			// this could be something like
@@ -659,4 +663,10 @@ func helmReleaseName(key types.NamespacedName, rel *helmv2.HelmRelease) types.Na
 		helmReleaseNamespace = key.Namespace
 	}
 	return types.NamespacedName{Name: helmReleaseName, Namespace: helmReleaseNamespace}
+}
+
+func checkReleaseGeneration(rel helmv2.HelmRelease) bool {
+	generation := rel.GetGeneration()
+	observedGeneration := rel.Status.ObservedGeneration
+	return generation > 0 && generation == observedGeneration
 }

@@ -10,8 +10,9 @@ import (
 	"reflect"
 	"strings"
 
-	sourcev1 "github.com/fluxcd/source-controller/api/v1beta1"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
 	corev1 "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/packages/v1alpha1"
+	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/fluxv2/packages/v1alpha1/common"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/pkgutils"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/statuserror"
 	"github.com/kubeapps/kubeapps/pkg/chart/models"
@@ -23,20 +24,6 @@ import (
 	log "k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 )
-
-func (s *Server) listChartsInCluster(ctx context.Context, namespace string) ([]sourcev1.HelmChart, error) {
-	client, err := s.getClient(ctx, namespace)
-	if err != nil {
-		return nil, err
-	}
-
-	var chartList sourcev1.HelmChartList
-	if err = client.List(ctx, &chartList); err != nil {
-		return nil, statuserror.FromK8sError("list", "HelmChart", namespace+"/*", err)
-	} else {
-		return chartList.Items, nil
-	}
-}
 
 func (s *Server) getChartInCluster(ctx context.Context, key types.NamespacedName) (*sourcev1.HelmChart, error) {
 	client, err := s.getClient(ctx, key.Namespace)
@@ -50,8 +37,24 @@ func (s *Server) getChartInCluster(ctx context.Context, key types.NamespacedName
 	return &chartObj, nil
 }
 
-func (s *Server) availableChartDetail(ctx context.Context, repoName types.NamespacedName, chartName, chartVersion string) (*corev1.AvailablePackageDetail, error) {
-	log.Infof("+availableChartDetail(%s, %s, %s)", repoName, chartName, chartVersion)
+func (s *Server) availableChartDetail(ctx context.Context, packageRef *corev1.AvailablePackageReference, chartVersion string) (*corev1.AvailablePackageDetail, error) {
+	log.Infof("+availableChartDetail(%s, %s)", packageRef, chartVersion)
+
+	repoN, chartName, err := pkgutils.SplitChartIdentifier(packageRef.Identifier)
+	if err != nil {
+		return nil, err
+	}
+
+	// check specified repo exists and is in ready state
+	repoName := types.NamespacedName{Namespace: packageRef.Context.Namespace, Name: repoN}
+
+	// this verifies that the repo exists
+	repo, err := s.getRepoInCluster(ctx, repoName)
+	if err != nil {
+		return nil, err
+	} else if !isRepoReady(*repo) {
+		return nil, status.Errorf(codes.Internal, "repository [%s] is not in Ready state", repoName)
+	}
 
 	chartID := fmt.Sprintf("%s/%s", repoName.Name, chartName)
 	// first, try the happy path - we have the chart version and the corresponding entry
@@ -94,12 +97,31 @@ func (s *Server) availableChartDetail(ctx context.Context, repoName types.Namesp
 		return nil, err
 	}
 
-	return availablePackageDetailFromChartDetail(chartID, chartDetail)
+	pkgDetail, err := availablePackageDetailFromChartDetail(chartID, chartDetail)
+	if err != nil {
+		return nil, err
+	}
+
+	// fix up a couple of fields that don't come from the chart tarball
+	repoUrl := repo.Spec.URL
+	if repoUrl == "" {
+		return nil, status.Errorf(codes.NotFound, "Missing required field spec.url on repository %q", repoName)
+	}
+
+	pkgDetail.RepoUrl = repoUrl
+	pkgDetail.AvailablePackageRef.Context.Namespace = packageRef.Context.Namespace
+	// per https://github.com/kubeapps/kubeapps/pull/3686#issue-1038093832
+	pkgDetail.AvailablePackageRef.Context.Cluster = s.kubeappsCluster
+	return pkgDetail, nil
 }
 
 func (s *Server) getChart(ctx context.Context, repo types.NamespacedName, chartName string) (*models.Chart, error) {
 	if s.repoCache == nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "server cache has not been properly initialized")
+	} else if ok, err := s.hasAccessToNamespace(ctx, common.GetChartsGvr(), repo.Namespace); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, status.Errorf(codes.PermissionDenied, "user has no [get] access for HelmCharts in namespace [%s]", repo.Namespace)
 	}
 
 	key := s.repoCache.KeyForNamespacedName(repo)

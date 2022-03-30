@@ -25,14 +25,8 @@ import (
 	log "k8s.io/klog/v2"
 )
 
-func (s *Server) buildAvailablePackageSummary(pkgMetadata *datapackagingv1alpha1.PackageMetadata, pkgVersionsMap map[string][]pkgSemver, cluster string) (*corev1.AvailablePackageSummary, error) {
+func (s *Server) buildAvailablePackageSummary(pkgMetadata *datapackagingv1alpha1.PackageMetadata, latestVersion string, cluster string) *corev1.AvailablePackageSummary {
 	var iconStringBuilder strings.Builder
-
-	// get the versions associated with the package
-	versions := pkgVersionsMap[pkgMetadata.Name]
-	if len(versions) == 0 {
-		return nil, fmt.Errorf("no package versions for the package %q", pkgMetadata.Name)
-	}
 
 	// Carvel uses base64-encoded SVG data for IconSVGBase64, whereas we need
 	// a url, so convert to a data-url.
@@ -58,8 +52,8 @@ func (s *Server) buildAvailablePackageSummary(pkgMetadata *datapackagingv1alpha1
 		// Currently, PkgVersion and AppVersion are the same
 		// https://kubernetes.slack.com/archives/CH8KCCKA5/p1636386358322000?thread_ts=1636371493.320900&cid=CH8KCCKA5
 		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: versions[0].version.String(),
-			AppVersion: versions[0].version.String(),
+			PkgVersion: latestVersion,
+			AppVersion: latestVersion,
 		},
 		IconUrl:          iconStringBuilder.String(),
 		DisplayName:      pkgMetadata.Spec.DisplayName,
@@ -67,7 +61,7 @@ func (s *Server) buildAvailablePackageSummary(pkgMetadata *datapackagingv1alpha1
 		Categories:       pkgMetadata.Spec.Categories,
 	}
 
-	return availablePackageSummary, nil
+	return availablePackageSummary
 }
 
 func (s *Server) buildAvailablePackageDetail(pkgMetadata *datapackagingv1alpha1.PackageMetadata, requestedPkgVersion string, foundPkgSemver *pkgSemver, cluster string) (*corev1.AvailablePackageDetail, error) {
@@ -321,7 +315,7 @@ func (s *Server) buildSecret(installedPackageName, values, targetNamespace strin
 
 func (s *Server) buildPkgInstall(installedPackageName, targetCluster, targetNamespace, packageRefName, pkgVersion string, reconciliationOptions *corev1.ReconciliationOptions, secret *k8scorev1.Secret) (*packagingv1alpha1.PackageInstall, error) {
 	// Calculate the constraints and prerelease fields
-	versionConstraints, err := versionConstraintWithUpgradePolicy(pkgVersion, s.pluginConfig.defaultUpgradePolicy)
+	versionConstraints, err := pkgutils.VersionConstraintWithUpgradePolicy(pkgVersion, s.pluginConfig.defaultUpgradePolicy)
 	if err != nil {
 		return nil, err
 	}

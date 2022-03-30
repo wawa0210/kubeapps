@@ -5,30 +5,25 @@ package main
 
 import (
 	"context"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	sourcev1 "github.com/fluxcd/source-controller/api/v1beta1"
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
 	redismock "github.com/go-redis/redismock/v8"
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/packages/v1alpha1"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/fluxv2/packages/v1alpha1/cache"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/fluxv2/packages/v1alpha1/common"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/clientgetter"
-	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/pkgutils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"helm.sh/helm/v3/pkg/action"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	log "k8s.io/klog/v2"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
 )
 
 func TestGetAvailablePackagesStatus(t *testing.T) {
@@ -67,9 +62,9 @@ func TestGetAvailablePackagesStatus(t *testing.T) {
 				&sourcev1.HelmRepositoryStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
-							Status: "False",
-							Reason: "IndexationFailed",
+							Type:   fluxmeta.ReadyCondition,
+							Status: metav1.ConditionFalse,
+							Reason: fluxmeta.FailedReason,
 						},
 					},
 				}),
@@ -82,9 +77,9 @@ func TestGetAvailablePackagesStatus(t *testing.T) {
 				&sourcev1.HelmRepositoryStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
-							Status: "True",
-							Reason: "IndexationSucceed",
+							Type:   fluxmeta.ReadyCondition,
+							Status: metav1.ConditionTrue,
+							Reason: fluxmeta.SucceededReason,
 						},
 					},
 				}),
@@ -97,9 +92,9 @@ func TestGetAvailablePackagesStatus(t *testing.T) {
 				&sourcev1.HelmRepositoryStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
-							Status: "True",
-							Reason: "IndexationSucceed",
+							Type:   fluxmeta.ReadyCondition,
+							Status: metav1.ConditionTrue,
+							Reason: fluxmeta.SucceededReason,
 						},
 					},
 				}),
@@ -112,9 +107,9 @@ func TestGetAvailablePackagesStatus(t *testing.T) {
 				&sourcev1.HelmRepositoryStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
-							Status: "True",
-							Reason: "IndexationSucceed",
+							Type:   fluxmeta.ReadyCondition,
+							Status: metav1.ConditionTrue,
+							Reason: fluxmeta.SucceededReason,
 						},
 					},
 				}),
@@ -130,9 +125,9 @@ func TestGetAvailablePackagesStatus(t *testing.T) {
 				&sourcev1.HelmRepositoryStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
-							Status: "True",
-							Reason: "IndexationSucceed",
+							Type:   fluxmeta.ReadyCondition,
+							Status: metav1.ConditionTrue,
+							Reason: fluxmeta.SucceededReason,
 						},
 					},
 				}),
@@ -175,151 +170,6 @@ func TestGetAvailablePackagesStatus(t *testing.T) {
 
 			if err = mock.ExpectationsWereMet(); err != nil {
 				t.Fatalf("%v", err)
-			}
-		})
-	}
-}
-
-func TestParsePluginConfig(t *testing.T) {
-	testCases := []struct {
-		name                    string
-		pluginYAMLConf          []byte
-		exp_versions_in_summary pkgutils.VersionsInSummary
-		exp_error_str           string
-	}{
-		{
-			name:                    "non existing plugin-config file",
-			pluginYAMLConf:          nil,
-			exp_versions_in_summary: pkgutils.VersionsInSummary{Major: 0, Minor: 0, Patch: 0},
-			exp_error_str:           "no such file or directory",
-		},
-		{
-			name: "non-default plugin config",
-			pluginYAMLConf: []byte(`
-core:
-  packages:
-    v1alpha1:
-      versionsInSummary:
-        major: 4
-        minor: 2
-        patch: 1
-      `),
-			exp_versions_in_summary: pkgutils.VersionsInSummary{Major: 4, Minor: 2, Patch: 1},
-			exp_error_str:           "",
-		},
-		{
-			name: "partial params in plugin config",
-			pluginYAMLConf: []byte(`
-core:
-  packages:
-    v1alpha1:
-      versionsInSummary:
-        major: 1
-        `),
-			exp_versions_in_summary: pkgutils.VersionsInSummary{Major: 1, Minor: 0, Patch: 0},
-			exp_error_str:           "",
-		},
-		{
-			name: "invalid plugin config",
-			pluginYAMLConf: []byte(`
-core:
-  packages:
-    v1alpha1:
-      versionsInSummary:
-        major: 4
-        minor: 2
-        patch: 1-IFC-123
-      `),
-			exp_versions_in_summary: pkgutils.VersionsInSummary{},
-			exp_error_str:           "json: cannot unmarshal",
-		},
-	}
-	opts := cmpopts.IgnoreUnexported(pkgutils.VersionsInSummary{})
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			filename := ""
-			if tc.pluginYAMLConf != nil {
-				pluginJSONConf, err := yaml.YAMLToJSON(tc.pluginYAMLConf)
-				if err != nil {
-					log.Fatalf("%s", err)
-				}
-				f, err := os.CreateTemp(".", "plugin_json_conf")
-				if err != nil {
-					log.Fatalf("%s", err)
-				}
-				defer os.Remove(f.Name()) // clean up
-				if _, err := f.Write(pluginJSONConf); err != nil {
-					log.Fatalf("%s", err)
-				}
-				if err := f.Close(); err != nil {
-					log.Fatalf("%s", err)
-				}
-				filename = f.Name()
-			}
-			versions_in_summary, _, goterr := parsePluginConfig(filename)
-			if goterr != nil && !strings.Contains(goterr.Error(), tc.exp_error_str) {
-				t.Errorf("err got %q, want to find %q", goterr.Error(), tc.exp_error_str)
-			}
-			if got, want := versions_in_summary, tc.exp_versions_in_summary; !cmp.Equal(want, got, opts) {
-				t.Errorf("mismatch (-want +got):\n%s", cmp.Diff(want, got, opts))
-			}
-		})
-	}
-}
-
-func TestParsePluginConfigTimeout(t *testing.T) {
-	testCases := []struct {
-		name           string
-		pluginYAMLConf []byte
-		exp_timeout    int32
-		exp_error_str  string
-	}{
-		{
-			name:           "no timeout specified in plugin config",
-			pluginYAMLConf: nil,
-			exp_timeout:    0,
-			exp_error_str:  "",
-		},
-		{
-			name: "specific timeout in plugin config",
-			pluginYAMLConf: []byte(`
-core:
-  packages:
-    v1alpha1:
-      timeoutSeconds: 650
-      `),
-			exp_timeout:   650,
-			exp_error_str: "",
-		},
-	}
-	opts := cmpopts.IgnoreUnexported(pkgutils.VersionsInSummary{})
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			filename := ""
-			if tc.pluginYAMLConf != nil {
-				pluginJSONConf, err := yaml.YAMLToJSON(tc.pluginYAMLConf)
-				if err != nil {
-					log.Fatalf("%s", err)
-				}
-				f, err := os.CreateTemp(".", "plugin_json_conf")
-				if err != nil {
-					log.Fatalf("%s", err)
-				}
-				defer os.Remove(f.Name()) // clean up
-				if _, err := f.Write(pluginJSONConf); err != nil {
-					log.Fatalf("%s", err)
-				}
-				if err := f.Close(); err != nil {
-					log.Fatalf("%s", err)
-				}
-				filename = f.Name()
-			}
-			_, timeoutSeconds, goterr := parsePluginConfig(filename)
-			if goterr != nil && !strings.Contains(goterr.Error(), tc.exp_error_str) {
-				t.Errorf("err got %q, want to find %q", goterr.Error(), tc.exp_error_str)
-			}
-			if got, want := timeoutSeconds, tc.exp_timeout; !cmp.Equal(want, got, opts) {
-				t.Errorf("mismatch (-want +got):\n%s", cmp.Diff(want, got, opts))
 			}
 		})
 	}
@@ -373,17 +223,24 @@ func newServer(t *testing.T,
 
 	okRepos := sets.String{}
 	for _, r := range repos {
+		key, err := redisKeyForRepo(r)
+		if err != nil {
+			t.Logf("Skipping repo [%s] due to %+v", key, err)
+			continue
+		}
 		if isRepoReady(r) {
 			// we are willfully just logging any errors coming from redisMockSetValueForRepo()
 			// here and just skipping over to next repo. This is done for test
 			// TestGetAvailablePackagesStatus where we make sure that even if the flux CRD happens
 			// to be invalid flux plug in can still operate
-			key, _, err := sink.redisMockSetValueForRepo(mock, r)
+			_, _, err = sink.redisMockSetValueForRepo(mock, r, nil)
 			if err != nil {
 				t.Logf("Skipping repo [%s] due to %+v", key, err)
 			} else {
 				okRepos.Insert(key)
 			}
+		} else {
+			mock.ExpectGet(key).RedisNil()
 		}
 	}
 
@@ -432,7 +289,7 @@ func newServer(t *testing.T,
 	}
 
 	cacheConfig := cache.NamespacedResourceWatcherCacheConfig{
-		Gvr:          repositoriesGvr,
+		Gvr:          common.GetRepositoriesGvr(),
 		ClientGetter: backgroundClientGetter,
 		OnAddFunc:    sink.onAddRepo,
 		OnModifyFunc: sink.onModifyRepo,
@@ -456,13 +313,16 @@ func newServer(t *testing.T,
 	}
 
 	repoCache, err := cache.NewNamespacedResourceWatcherCache(
-		"repoCacheTest", cacheConfig, redisCli, stopCh)
+		"repoCacheTest", cacheConfig, redisCli, stopCh, true)
 	if err != nil {
 		return nil, mock, err
 	}
 	t.Cleanup(func() { repoCache.Shutdown() })
 
-	// need to wait until ChartCache has finished syncing
+	// need to wait until repoCache has finished syncing
+	repoCache.WaitUntilResyncComplete()
+
+	// need to wait until chartCache has finished syncing
 	for key := range cachedChartKeys {
 		chartCache.WaitUntilForgotten(key)
 	}
@@ -472,14 +332,15 @@ func newServer(t *testing.T,
 	}
 
 	s := &Server{
-		clientGetter: clientGetter,
+		clientGetter:               clientGetter,
+		serviceAccountClientGetter: backgroundClientGetter,
 		actionConfigGetter: func(context.Context, string) (*action.Configuration, error) {
 			return actionConfig, nil
 		},
-		repoCache:         repoCache,
-		chartCache:        chartCache,
-		kubeappsCluster:   KubeappsCluster,
-		versionsInSummary: pkgutils.GetDefaultVersionsInSummary(),
+		repoCache:       repoCache,
+		chartCache:      chartCache,
+		kubeappsCluster: KubeappsCluster,
+		pluginConfig:    &common.DefaultPluginConfig,
 	}
 	return s, mock, nil
 }

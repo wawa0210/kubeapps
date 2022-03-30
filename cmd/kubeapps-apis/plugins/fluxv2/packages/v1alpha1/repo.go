@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/gob"
 	"fmt"
 	"reflect"
@@ -13,8 +14,9 @@ import (
 	"strings"
 	"time"
 
-	sourcev1 "github.com/fluxcd/source-controller/api/v1beta1"
-	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/plugins/fluxv2/packages/v1alpha1"
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
+	corev1 "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/packages/v1alpha1"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/fluxv2/packages/v1alpha1/cache"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/fluxv2/packages/v1alpha1/common"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/clientgetter"
@@ -28,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	log "k8s.io/klog/v2"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -39,22 +42,57 @@ const (
 	fluxHelmRepositoryList = "HelmRepositoryList"
 )
 
-// namespace maybe apiv1.NamespaceAll, in which case repositories from all namespaces are returned
-func (s *Server) listReposInNamespace(ctx context.Context, namespace string) ([]sourcev1.HelmRepository, error) {
-	client, err := s.getClient(ctx, namespace)
+var (
+	// default poll interval is 10 min
+	defaultPollInterval = metav1.Duration{Duration: 10 * time.Minute}
+)
+
+// returns a list of HelmRepositories from all namespaces (cluster-wide), excluding
+// the ones that the caller has no read access to
+func (s *Server) listReposInAllNamespaces(ctx context.Context) ([]sourcev1.HelmRepository, error) {
+	// the actual List(...) call will be executed in the context of
+	// kubeapps-internal-kubeappsapis service account
+	// ref https://github.com/kubeapps/kubeapps/issues/4390 for explanation
+	backgroundCtx := context.Background()
+	client, err := s.serviceAccountClientGetter.ControllerRuntime(backgroundCtx)
 	if err != nil {
 		return nil, err
 	}
 
 	var repoList sourcev1.HelmRepositoryList
-	if err := client.List(ctx, &repoList); err != nil {
-		return nil, statuserror.FromK8sError("list", "HelmRepository", namespace+"/*", err)
+	if err := client.List(backgroundCtx, &repoList); err != nil {
+		return nil, statuserror.FromK8sError("list", "HelmRepository", "", err)
 	} else {
-		return repoList.Items, nil
+		// filter out those repos the caller has no access to
+		namespaces := sets.String{}
+		for _, item := range repoList.Items {
+			namespaces.Insert(item.GetNamespace())
+		}
+		allowedNamespaces := sets.String{}
+		gvr := common.GetRepositoriesGvr()
+		for ns := range namespaces {
+			if ok, err := s.hasAccessToNamespace(ctx, gvr, ns); err == nil && ok {
+				allowedNamespaces.Insert(ns)
+			} else if err != nil {
+				return nil, err
+			}
+		}
+		items := []sourcev1.HelmRepository{}
+		for _, item := range repoList.Items {
+			if allowedNamespaces.Has(item.GetNamespace()) {
+				items = append(items, item)
+			}
+		}
+		return items, nil
 	}
 }
 
 func (s *Server) getRepoInCluster(ctx context.Context, key types.NamespacedName) (*sourcev1.HelmRepository, error) {
+	// unlike List(), there is no need to execute Get() in the context of
+	// kubeapps-internal-kubeappsapis service account and then filter out results based on
+	// whether or not the caller hasAccessToNamespace(). We can just pass the caller
+	// context into Get() and if the caller isn't allowed, Get will raise an error, which is what we
+	// want
 	client, err := s.getClient(ctx, key.Namespace)
 	if err != nil {
 		return nil, err
@@ -67,12 +105,12 @@ func (s *Server) getRepoInCluster(ctx context.Context, key types.NamespacedName)
 }
 
 // regexp expressions are used for matching actual names against expected patters
-func (s *Server) filterReadyReposByName(repoList []sourcev1.HelmRepository, match []string) ([]string, error) {
+func (s *Server) filterReadyReposByName(repoList []sourcev1.HelmRepository, match []string) (sets.String, error) {
 	if s.repoCache == nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "server cache has not been properly initialized")
 	}
 
-	resultKeys := make([]string, 0)
+	resultKeys := sets.String{}
 	for _, repo := range repoList {
 		// first check if repo is in ready state
 		if !isRepoReady(repo) {
@@ -96,17 +134,18 @@ func (s *Server) filterReadyReposByName(repoList []sourcev1.HelmRepository, matc
 			matched = true
 		}
 		if matched {
-			resultKeys = append(resultKeys, s.repoCache.KeyForNamespacedName(*name))
+			resultKeys.Insert(s.repoCache.KeyForNamespacedName(*name))
 		}
 	}
 	return resultKeys, nil
 }
 
+// Notes:
+// 1. with flux, an available package may be from a repo in any namespace accessible to the caller
+// 2. can't rely on cache as a real source of truth for key names
+//    because redis may evict cache entries due to memory pressure to make room for new ones
 func (s *Server) getChartsForRepos(ctx context.Context, match []string) (map[string][]models.Chart, error) {
-	// 1. with flux an available package may be from a repo in any namespace
-	// 2. can't rely on cache as a real source of truth for key names
-	//    because redis may evict cache entries due to memory pressure to make room for new ones
-	repoList, err := s.listReposInNamespace(ctx, apiv1.NamespaceAll)
+	repoList, err := s.listReposInAllNamespaces(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +197,284 @@ func (s *Server) clientOptionsForRepo(ctx context.Context, repoName types.Namesp
 		chartCache:   s.chartCache,
 	}
 	return sink.clientOptionsForRepo(ctx, *repo)
+}
+
+func (s *Server) newRepo(ctx context.Context, targetName types.NamespacedName, url string, interval uint32,
+	tlsConfig *corev1.PackageRepositoryTlsConfig, auth *corev1.PackageRepositoryAuth) (*corev1.PackageRepositoryReference, error) {
+	if url == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "repository url may not be empty")
+	}
+
+	var secret *apiv1.Secret
+	if tlsConfig != nil {
+		if tlsConfig.InsecureSkipVerify {
+			return nil, status.Errorf(codes.Unimplemented, "TLS flag insecureSkipVerify is not supported")
+		}
+		caCert := tlsConfig.GetCertAuthority()
+		if caCert != "" {
+			secret = common.NewLocalOpaqueSecret(targetName.Name + "-")
+			secret.Data["caFile"] = []byte(caCert)
+		}
+	}
+	if auth != nil && auth.GetSecretRef() == nil {
+		if secret == nil {
+			secret = common.NewLocalOpaqueSecret(targetName.Name + "-")
+		}
+		switch auth.Type {
+		case corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH:
+			if unp := auth.GetUsernamePassword(); unp != nil {
+				secret.Data["username"] = []byte(unp.Username)
+				secret.Data["password"] = []byte(unp.Password)
+			} else {
+				return nil, status.Errorf(codes.Internal, "Username/Password configuration is missing")
+			}
+		case corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_TLS:
+			if ck := auth.GetTlsCertKey(); ck != nil {
+				secret.Data["certFile"] = []byte(ck.Cert)
+				secret.Data["keyFile"] = []byte(ck.Key)
+			} else {
+				return nil, status.Errorf(codes.Internal, "TLS Cert/Key configuration is missing")
+			}
+		case corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BEARER, corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_CUSTOM:
+			return nil, status.Errorf(codes.Unimplemented, "Package repository authentication type %q is not supported", auth.Type)
+		case corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_DOCKER_CONFIG_JSON:
+			if dc := auth.GetDockerCreds(); dc != nil {
+				secret.Type = apiv1.SecretTypeDockerConfigJson
+				// ref https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+				authStr := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", dc.Username, dc.Password)))
+				configStr := fmt.Sprintf("{\"auths\":{\"%s\":{\"username\":\"%s\",\"password\":\"%s\",\"email\":\"%s\",\"auth\":\"%s\"}}}",
+					dc.Server, dc.Username, dc.Password, dc.Email, authStr)
+				secret.Data[".dockerconfigjson"] = []byte(base64.StdEncoding.EncodeToString([]byte(configStr)))
+			} else {
+				return nil, status.Errorf(codes.Internal, "Docker credentials configuration is missing")
+			}
+		default:
+			return nil, status.Errorf(codes.Internal, "Unexpected package repository authentication type: %q", auth.Type)
+		}
+	}
+
+	passCredentials := auth != nil && auth.PassCredentials
+
+	secretRef, checkSecret := "", false
+	if secret != nil {
+		// create a secret first, if applicable
+		if typedClient, err := s.clientGetter.Typed(ctx, s.kubeappsCluster); err != nil {
+			return nil, err
+		} else if secret, err = typedClient.CoreV1().Secrets(targetName.Namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+			return nil, statuserror.FromK8sError("create", "secret", secret.GetName(), err)
+		} else {
+			secretRef = secret.GetName()
+		}
+	} else if tlsConfig != nil && tlsConfig.GetSecretRef().GetName() != "" {
+		// check that the specified secret exists
+		secretRef, checkSecret = tlsConfig.GetSecretRef().GetName(), true
+	} else if auth != nil && auth.GetSecretRef().GetName() != "" {
+		secretRef, checkSecret = auth.GetSecretRef().GetName(), true
+	}
+
+	if secretRef != "" && checkSecret {
+		// check that the specified secret exists
+		if typedClient, err := s.clientGetter.Typed(ctx, s.kubeappsCluster); err != nil {
+			return nil, err
+		} else if _, err = typedClient.CoreV1().Secrets(targetName.Namespace).Get(ctx, secretRef, metav1.GetOptions{}); err != nil {
+			return nil, statuserror.FromK8sError("get", "secret", secretRef, err)
+		}
+		// TODO (gfichtenholt) also check that the data in the opaque secret corresponds
+		// to specified auth type, e.g. if AuthType is
+		// PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH,
+		// check that the secret has "username" and "password" fields, etc.
+
+		// TODO (gfichtenholt)
+		// ref https://github.com/kubeapps/kubeapps/pull/4353#discussion_r816332595
+		// check whether flux supports typed secrets in addition to opaque secrets
+		// https://kubernetes.io/docs/concepts/configuration/secret/#secret-types
+		// If so, that cause certain validation to be done on the data (ie. ensuring that
+		//	the "username" and "password" fields are present).
+	}
+
+	if fluxRepo, err := s.newFluxHelmRepo(targetName, url, interval, secretRef, passCredentials); err != nil {
+		return nil, err
+	} else if client, err := s.getClient(ctx, targetName.Namespace); err != nil {
+		return nil, err
+	} else if err = client.Create(ctx, fluxRepo); err != nil {
+		return nil, statuserror.FromK8sError("create", "HelmRepository", targetName.String(), err)
+	} else {
+		return &corev1.PackageRepositoryReference{
+			Context: &corev1.Context{
+				Namespace: fluxRepo.Namespace,
+				Cluster:   s.kubeappsCluster,
+			},
+			Identifier: fluxRepo.Name,
+			Plugin:     GetPluginDetail(),
+		}, nil
+	}
+}
+
+// ref https://fluxcd.io/docs/components/source/helmrepositories/
+func (s *Server) newFluxHelmRepo(
+	targetName types.NamespacedName,
+	url string,
+	interval uint32,
+	secretRef string,
+	passCredentials bool) (*sourcev1.HelmRepository, error) {
+	pollInterval := defaultPollInterval
+	if interval > 0 {
+		pollInterval = metav1.Duration{Duration: time.Duration(interval) * time.Second}
+	}
+	fluxRepo := &sourcev1.HelmRepository{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       sourcev1.HelmRepositoryKind,
+			APIVersion: sourcev1.GroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      targetName.Name,
+			Namespace: targetName.Namespace,
+		},
+		Spec: sourcev1.HelmRepositorySpec{
+			URL:      url,
+			Interval: pollInterval,
+		},
+	}
+	if secretRef != "" {
+		fluxRepo.Spec.SecretRef = &fluxmeta.LocalObjectReference{
+			Name: secretRef,
+		}
+	}
+	if passCredentials {
+		fluxRepo.Spec.PassCredentials = true
+	}
+	return fluxRepo, nil
+}
+
+func (s *Server) repoDetail(ctx context.Context, repoRef *corev1.PackageRepositoryReference) (*corev1.PackageRepositoryDetail, error) {
+	key := types.NamespacedName{Namespace: repoRef.Context.Namespace, Name: repoRef.Identifier}
+
+	repo, err := s.getRepoInCluster(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	var tlsConfig *corev1.PackageRepositoryTlsConfig
+	auth := &corev1.PackageRepositoryAuth{
+		Type:            corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_UNSPECIFIED,
+		PassCredentials: repo.Spec.PassCredentials,
+	}
+	if repo.Spec.SecretRef != nil {
+		secretName := repo.Spec.SecretRef.Name
+		if s == nil || s.clientGetter == nil {
+			return nil, status.Errorf(codes.Internal, "unexpected state in clientGetterHolder instance")
+		}
+		typedClient, err := s.clientGetter.Typed(ctx, s.kubeappsCluster)
+		if err != nil {
+			return nil, err
+		}
+		secret, err := typedClient.CoreV1().Secrets(repo.Namespace).Get(ctx, secretName, metav1.GetOptions{})
+		if err != nil {
+			return nil, statuserror.FromK8sError("get", "secret", secretName, err)
+		}
+		if _, ok := secret.Data["caFile"]; ok {
+			tlsConfig = &corev1.PackageRepositoryTlsConfig{
+				// flux plug in doesn't support this option
+				InsecureSkipVerify: false,
+				PackageRepoTlsConfigOneOf: &corev1.PackageRepositoryTlsConfig_SecretRef{
+					SecretRef: &corev1.SecretKeyReference{
+						Name: secretName,
+						Key:  "caFile",
+					},
+				},
+			}
+		}
+		if _, ok := secret.Data["certFile"]; ok {
+			if _, ok = secret.Data["keyFile"]; ok {
+				auth.Type = corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_TLS
+				auth.PackageRepoAuthOneOf = &corev1.PackageRepositoryAuth_SecretRef{
+					SecretRef: &corev1.SecretKeyReference{Name: secretName},
+				}
+			}
+		} else if _, ok := secret.Data["username"]; ok {
+			if _, ok = secret.Data["password"]; ok {
+				auth.Type = corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH
+				auth.PackageRepoAuthOneOf = &corev1.PackageRepositoryAuth_SecretRef{
+					SecretRef: &corev1.SecretKeyReference{Name: secretName},
+				}
+			}
+		} else if _, ok := secret.Data[".dockerconfigjson"]; ok {
+			auth.Type = corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_DOCKER_CONFIG_JSON
+			auth.PackageRepoAuthOneOf = &corev1.PackageRepositoryAuth_SecretRef{
+				SecretRef: &corev1.SecretKeyReference{Name: secretName},
+			}
+		} else {
+			log.Warning("Unrecognized type of secret [%s]", secretName)
+		}
+	}
+
+	return &corev1.PackageRepositoryDetail{
+		PackageRepoRef: &corev1.PackageRepositoryReference{
+			Context: &corev1.Context{
+				Namespace: repo.Namespace,
+				Cluster:   s.kubeappsCluster,
+			},
+			Identifier: repo.Name,
+			Plugin:     GetPluginDetail(),
+		},
+		Name: repo.Name,
+		// TBD Flux HelmRepository CR doesn't have a designated field for description
+		Description:     "",
+		NamespaceScoped: false,
+		Type:            "helm",
+		Url:             repo.Spec.URL,
+		Interval:        uint32(repo.Spec.Interval.Duration.Seconds()),
+		TlsConfig:       tlsConfig,
+		Auth:            auth,
+		CustomDetail:    nil,
+		Status:          repoStatus(*repo),
+	}, nil
+}
+
+func (s *Server) repoSummaries(ctx context.Context, namespace string) ([]*corev1.PackageRepositorySummary, error) {
+	summaries := []*corev1.PackageRepositorySummary{}
+	var repos []sourcev1.HelmRepository
+	var err error
+	if namespace == apiv1.NamespaceAll {
+		if repos, err = s.listReposInAllNamespaces(ctx); err != nil {
+			return nil, err
+		}
+	} else {
+		// here, the right semantics are different than that of availablePackageSummaries()
+		// namely, if a specific namespace is passed in, we need to list repos in that namespace
+		// and if the caller happens not to have 'read' access to that namespace, a PermissionDenied
+		// error should be raised, as opposed to returning an empty list with no error
+		var repoList sourcev1.HelmRepositoryList
+		var client ctrlclient.Client
+		if client, err = s.getClient(ctx, namespace); err != nil {
+			return nil, err
+		} else if err = client.List(ctx, &repoList); err != nil {
+			return nil, statuserror.FromK8sError("list", "HelmRepository", "", err)
+		} else {
+			repos = repoList.Items
+		}
+	}
+	for _, repo := range repos {
+		summary := &corev1.PackageRepositorySummary{
+			PackageRepoRef: &corev1.PackageRepositoryReference{
+				Context: &corev1.Context{
+					Namespace: repo.Namespace,
+					Cluster:   s.kubeappsCluster,
+				},
+				Identifier: repo.Name,
+				Plugin:     GetPluginDetail(),
+			},
+			Name: repo.Name,
+			// TBD Flux HelmRepository CR doesn't have a designated field for description
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             repo.Spec.URL,
+			Status:          repoStatus(repo),
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, nil
 }
 
 //
@@ -246,11 +563,6 @@ func (s *repoEventSink) indexAndEncode(checksum string, repo sourcev1.HelmReposi
 func (s *repoEventSink) indexOneRepo(repo sourcev1.HelmRepository) ([]models.Chart, error) {
 	startTime := time.Now()
 
-	pkgRepo, err := packageRepositoryFromFlux(repo)
-	if err != nil {
-		return nil, err
-	}
-
 	// ref https://fluxcd.io/docs/components/source/helmrepositories/#status
 	indexUrl := repo.Status.URL
 	if indexUrl == "" {
@@ -275,9 +587,9 @@ func (s *repoEventSink) indexOneRepo(repo sourcev1.HelmRepository) ([]models.Cha
 	}
 
 	modelRepo := &models.Repo{
-		Namespace: pkgRepo.Namespace,
-		Name:      pkgRepo.Name,
-		URL:       pkgRepo.Url,
+		Namespace: repo.Namespace,
+		Name:      repo.Name,
+		URL:       repo.Spec.URL,
 		Type:      "helm",
 	}
 
@@ -435,7 +747,7 @@ func (s *repoEventSink) clientOptionsForRepo(ctx context.Context, repo sourcev1.
 func isRepoReady(repo sourcev1.HelmRepository) bool {
 	// see docs at https://fluxcd.io/docs/components/source/helmrepositories/
 	// Confirm the state we are observing is for the current generation
-	if !common.CheckGeneration(&repo) {
+	if !checkRepoGeneration(repo) {
 		return false
 	}
 
@@ -443,38 +755,19 @@ func isRepoReady(repo sourcev1.HelmRepository) bool {
 	return completed && success
 }
 
-func packageRepositoryFromFlux(repo sourcev1.HelmRepository) (*v1alpha1.PackageRepository, error) {
-	name, err := common.NamespacedName(&repo)
-	if err != nil {
-		return nil, err
-	}
-
-	url := repo.Spec.URL
-	if url == "" {
-		return nil, status.Errorf(
-			codes.Internal,
-			"required field spec.url not found on HelmRepository:\n%s",
-			common.PrettyPrint(repo))
-	}
-	return &v1alpha1.PackageRepository{
-		Name:      name.Name,
-		Namespace: name.Namespace,
-		Url:       url,
-	}, nil
-}
-
 // returns 3 things:
-// - complete whether the operation was completed
-// - success (only applicable when complete == true) whether the operation was successful or failed
-// - reason, if present
+// - complete: whether the operation was completed
+// - success: (only applicable when complete == true) whether the operation was successful or failed
+// - reason: if present
 // docs:
 // 1. https://fluxcd.io/docs/components/source/helmrepositories/#status-examples
 func isHelmRepositoryReady(repo sourcev1.HelmRepository) (complete bool, success bool, reason string) {
-	if !common.CheckGeneration(&repo) {
-		return false, false, ""
-	}
-
-	readyCond := meta.FindStatusCondition(*repo.GetStatusConditions(), "Ready")
+	// flux source-controller v1beta2 API made a change so that we can no longer
+	// rely on a simple "metadata.generation" vs "status.observedGeneration" check for a
+	// quick answer. The resource may now exist with "observedGeneration": -1 either in
+	// pending or in a failed state. We need to distinguish between the two. Personally,
+	// feels like a mistake to me.
+	readyCond := meta.FindStatusCondition(repo.GetConditions(), fluxmeta.ReadyCondition)
 	if readyCond != nil {
 		if readyCond.Reason != "" {
 			// this could be something like
@@ -490,11 +783,34 @@ func isHelmRepositoryReady(repo sourcev1.HelmRepository) (complete bool, success
 		}
 		switch readyCond.Status {
 		case metav1.ConditionTrue:
-			return true, true, reason
+			return checkRepoGeneration(repo), true, reason
 		case metav1.ConditionFalse:
 			return true, false, reason
 			// metav1.ConditionUnknown falls through
 		}
 	}
 	return false, false, reason
+}
+
+func repoStatus(repo sourcev1.HelmRepository) *corev1.PackageRepositoryStatus {
+	complete, success, reason := isHelmRepositoryReady(repo)
+	s := &corev1.PackageRepositoryStatus{
+		Ready:      complete && success,
+		Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_UNSPECIFIED,
+		UserReason: reason,
+	}
+	if !complete {
+		s.Reason = corev1.PackageRepositoryStatus_STATUS_REASON_PENDING
+	} else if success {
+		s.Reason = corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS
+	} else {
+		s.Reason = corev1.PackageRepositoryStatus_STATUS_REASON_FAILED
+	}
+	return s
+}
+
+func checkRepoGeneration(repo sourcev1.HelmRepository) bool {
+	generation := repo.GetGeneration()
+	observedGeneration := repo.Status.ObservedGeneration
+	return generation > 0 && generation == observedGeneration
 }

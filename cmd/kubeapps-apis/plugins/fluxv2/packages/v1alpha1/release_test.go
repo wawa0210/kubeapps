@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -14,13 +13,15 @@ import (
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2beta1"
-	sourcev1 "github.com/fluxcd/source-controller/api/v1beta1"
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
 	redismock "github.com/go-redis/redismock/v8"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/packages/v1alpha1"
 	plugins "github.com/kubeapps/kubeapps/cmd/kubeapps-apis/gen/core/plugins/v1alpha1"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/clientgetter"
+	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/pkgutils"
 	"github.com/kubeapps/kubeapps/cmd/kubeapps-apis/plugins/pkg/resourcerefs/resourcerefstest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,15 +32,15 @@ import (
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/storage"
 	"helm.sh/helm/v3/pkg/storage/driver"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	"k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	typfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 type testSpecGetInstalledPackages struct {
@@ -513,112 +514,125 @@ type testSpecCreateInstalledPackage struct {
 
 func TestCreateInstalledPackage(t *testing.T) {
 	testCases := []struct {
-		name               string
-		request            *corev1.CreateInstalledPackageRequest
-		existingObjs       testSpecCreateInstalledPackage
-		expectedStatusCode codes.Code
-		expectedResponse   *corev1.CreateInstalledPackageResponse
-		expectedRelease    *helmv2.HelmRelease
+		name                    string
+		request                 *corev1.CreateInstalledPackageRequest
+		existingObjs            testSpecCreateInstalledPackage
+		expectedStatusCode      codes.Code
+		expectedResponse        *corev1.CreateInstalledPackageResponse
+		expectedRelease         *helmv2.HelmRelease
+		defaultUpgradePolicyStr string
 	}{
 		{
-			name: "create package (simple)",
-			request: &corev1.CreateInstalledPackageRequest{
-				AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
-				Name:                "my-podinfo",
-				TargetContext: &corev1.Context{
-					Namespace: "test",
-				},
-			},
+			name:    "create package (simple)",
+			request: create_package_simple_req,
 			existingObjs: testSpecCreateInstalledPackage{
 				repoName:      "podinfo",
 				repoNamespace: "namespace-1",
-				repoIndex:     "testdata/podinfo-index.yaml",
+				repoIndex:     testYaml("podinfo-index.yaml"),
 			},
 			expectedStatusCode: codes.OK,
 			expectedResponse:   create_installed_package_resp_my_podinfo,
 			expectedRelease:    flux_helm_release_basic,
 		},
 		{
-			name: "create package (semver constraint)",
-			request: &corev1.CreateInstalledPackageRequest{
-				AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
-				Name:                "my-podinfo",
-				TargetContext: &corev1.Context{
-					Namespace: "test",
-				},
-				PkgVersionReference: &corev1.VersionReference{
-					Version: "> 5",
-				},
-			},
+			name:    "create package (semver constraint)",
+			request: create_package_semver_constraint_req,
 			existingObjs: testSpecCreateInstalledPackage{
 				repoName:      "podinfo",
 				repoNamespace: "namespace-1",
-				repoIndex:     "testdata/podinfo-index.yaml",
+				repoIndex:     testYaml("podinfo-index.yaml"),
 			},
 			expectedStatusCode: codes.OK,
 			expectedResponse:   create_installed_package_resp_my_podinfo,
 			expectedRelease:    flux_helm_release_semver_constraint,
 		},
 		{
-			name: "create package (reconcile options)",
-			request: &corev1.CreateInstalledPackageRequest{
-				AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
-				Name:                "my-podinfo",
-				TargetContext: &corev1.Context{
-					Namespace: "test",
-				},
-				ReconciliationOptions: &corev1.ReconciliationOptions{
-					Interval:           60,
-					Suspend:            false,
-					ServiceAccountName: "foo",
-				},
-			},
+			name:    "create package (reconcile options)",
+			request: create_package_reconcile_options_req,
 			existingObjs: testSpecCreateInstalledPackage{
 				repoName:      "podinfo",
 				repoNamespace: "namespace-1",
-				repoIndex:     "testdata/podinfo-index.yaml",
+				repoIndex:     testYaml("podinfo-index.yaml"),
 			},
 			expectedStatusCode: codes.OK,
 			expectedResponse:   create_installed_package_resp_my_podinfo,
 			expectedRelease:    flux_helm_release_reconcile_options,
 		},
 		{
-			name: "create package (values JSON override)",
-			request: &corev1.CreateInstalledPackageRequest{
-				AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
-				Name:                "my-podinfo",
-				TargetContext: &corev1.Context{
-					Namespace: "test",
-				},
-				Values: "{\"ui\": { \"message\": \"what we do in the shadows\" } }",
-			},
+			name:    "create package (values JSON override)",
+			request: create_package_values_json_override,
 			existingObjs: testSpecCreateInstalledPackage{
 				repoName:      "podinfo",
 				repoNamespace: "namespace-1",
-				repoIndex:     "testdata/podinfo-index.yaml",
+				repoIndex:     testYaml("podinfo-index.yaml"),
 			},
 			expectedStatusCode: codes.OK,
 			expectedResponse:   create_installed_package_resp_my_podinfo,
 			expectedRelease:    flux_helm_release_values,
 		},
 		{
-			name: "create package (values YAML override)",
-			request: &corev1.CreateInstalledPackageRequest{
-				AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
-				Name:                "my-podinfo",
-				TargetContext: &corev1.Context{
-					Namespace: "test",
-				},
-				Values: "# Default values for podinfo.\n---\nui:\n  message: what we do in the shadows",
-			},
+			name:    "create package (values YAML override)",
+			request: create_package_values_yaml_override,
 			existingObjs: testSpecCreateInstalledPackage{
 				repoName:      "podinfo",
 				repoNamespace: "namespace-1",
-				repoIndex:     "testdata/podinfo-index.yaml",
+				repoIndex:     testYaml("podinfo-index.yaml"),
 			},
 			expectedStatusCode: codes.OK,
 			expectedResponse:   create_installed_package_resp_my_podinfo,
 			expectedRelease:    flux_helm_release_values,
+		},
+		{
+			name:    "create with specific version (upgrade policy none)",
+			request: create_package_for_test_of_upgrade_policy,
+			existingObjs: testSpecCreateInstalledPackage{
+				repoName:      "podinfo",
+				repoNamespace: "namespace-1",
+				repoIndex:     testYaml("podinfo-index.yaml"),
+			},
+			expectedStatusCode:      codes.OK,
+			expectedResponse:        create_installed_package_resp_my_podinfo,
+			expectedRelease:         flux_helm_release_upgrade_policy_none,
+			defaultUpgradePolicyStr: "none",
+		},
+		{
+			name:    "create with specific version (upgrade policy major)",
+			request: create_package_for_test_of_upgrade_policy,
+			existingObjs: testSpecCreateInstalledPackage{
+				repoName:      "podinfo",
+				repoNamespace: "namespace-1",
+				repoIndex:     testYaml("podinfo-index.yaml"),
+			},
+			expectedStatusCode:      codes.OK,
+			expectedResponse:        create_installed_package_resp_my_podinfo,
+			expectedRelease:         flux_helm_release_upgrade_policy_major,
+			defaultUpgradePolicyStr: "major",
+		},
+		{
+			name:    "create with specific version (upgrade policy minor)",
+			request: create_package_for_test_of_upgrade_policy,
+			existingObjs: testSpecCreateInstalledPackage{
+				repoName:      "podinfo",
+				repoNamespace: "namespace-1",
+				repoIndex:     testYaml("podinfo-index.yaml"),
+			},
+			expectedStatusCode:      codes.OK,
+			expectedResponse:        create_installed_package_resp_my_podinfo,
+			expectedRelease:         flux_helm_release_upgrade_policy_minor,
+			defaultUpgradePolicyStr: "minor",
+		},
+		{
+			name:    "create with specific version (upgrade policy patch)",
+			request: create_package_for_test_of_upgrade_policy,
+			existingObjs: testSpecCreateInstalledPackage{
+				repoName:      "podinfo",
+				repoNamespace: "namespace-1",
+				repoIndex:     testYaml("podinfo-index.yaml"),
+			},
+			expectedStatusCode:      codes.OK,
+			expectedResponse:        create_installed_package_resp_my_podinfo,
+			expectedRelease:         flux_helm_release_upgrade_policy_patch,
+			defaultUpgradePolicyStr: "patch",
 		},
 	}
 
@@ -642,6 +656,15 @@ func TestCreateInstalledPackage(t *testing.T) {
 			}
 
 			mock.ExpectGet(redisKey).SetVal(string(bytes))
+
+			if tc.defaultUpgradePolicyStr != "" {
+				policy, err := pkgutils.UpgradePolicyFromString(tc.defaultUpgradePolicyStr)
+				if err != nil {
+					t.Fatal(err)
+				} else {
+					s.pluginConfig.DefaultUpgradePolicy = policy
+				}
+			}
 
 			response, err := s.CreateInstalledPackage(context.Background(), tc.request)
 
@@ -693,12 +716,13 @@ func TestCreateInstalledPackage(t *testing.T) {
 
 func TestUpdateInstalledPackage(t *testing.T) {
 	testCases := []struct {
-		name               string
-		request            *corev1.UpdateInstalledPackageRequest
-		existingK8sObjs    *testSpecGetInstalledPackages
-		expectedStatusCode codes.Code
-		expectedResponse   *corev1.UpdateInstalledPackageResponse
-		expectedRelease    *helmv2.HelmRelease
+		name                    string
+		request                 *corev1.UpdateInstalledPackageRequest
+		existingK8sObjs         *testSpecGetInstalledPackages
+		expectedStatusCode      codes.Code
+		expectedResponse        *corev1.UpdateInstalledPackageResponse
+		expectedRelease         *helmv2.HelmRelease
+		defaultUpgradePolicyStr string
 	}{
 		{
 			name: "update package (simple)",
@@ -766,6 +790,54 @@ func TestUpdateInstalledPackage(t *testing.T) {
 			},
 			expectedRelease: flux_helm_release_updated_2,
 		},
+		{
+			name: "update package (default upgrade policy major)",
+			request: &corev1.UpdateInstalledPackageRequest{
+				InstalledPackageRef: my_redis_ref,
+				PkgVersionReference: &corev1.VersionReference{
+					Version: "14.4.0",
+				},
+			},
+			existingK8sObjs:    &redis_existing_spec_completed,
+			expectedStatusCode: codes.OK,
+			expectedResponse: &corev1.UpdateInstalledPackageResponse{
+				InstalledPackageRef: my_redis_ref,
+			},
+			expectedRelease:         flux_helm_release_updated_upgrade_major,
+			defaultUpgradePolicyStr: "major",
+		},
+		{
+			name: "update package (default upgrade policy minor)",
+			request: &corev1.UpdateInstalledPackageRequest{
+				InstalledPackageRef: my_redis_ref,
+				PkgVersionReference: &corev1.VersionReference{
+					Version: "14.4.0",
+				},
+			},
+			existingK8sObjs:    &redis_existing_spec_completed,
+			expectedStatusCode: codes.OK,
+			expectedResponse: &corev1.UpdateInstalledPackageResponse{
+				InstalledPackageRef: my_redis_ref,
+			},
+			expectedRelease:         flux_helm_release_updated_upgrade_minor,
+			defaultUpgradePolicyStr: "minor",
+		},
+		{
+			name: "update package (default upgrade policy patch)",
+			request: &corev1.UpdateInstalledPackageRequest{
+				InstalledPackageRef: my_redis_ref,
+				PkgVersionReference: &corev1.VersionReference{
+					Version: "14.4.0",
+				},
+			},
+			existingK8sObjs:    &redis_existing_spec_completed,
+			expectedStatusCode: codes.OK,
+			expectedResponse: &corev1.UpdateInstalledPackageResponse{
+				InstalledPackageRef: my_redis_ref,
+			},
+			expectedRelease:         flux_helm_release_updated_upgrade_patch,
+			defaultUpgradePolicyStr: "patch",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -774,11 +846,20 @@ func TestUpdateInstalledPackage(t *testing.T) {
 			if tc.existingK8sObjs != nil {
 				existingObjs = []testSpecGetInstalledPackages{*tc.existingK8sObjs}
 			}
-			charts, repos, cleanup := newChartsAndReleases(t, existingObjs)
+			charts, releases, cleanup := newChartsAndReleases(t, existingObjs)
 			defer cleanup()
-			s, mock, err := newServerWithChartsAndReleases(t, nil, charts, repos)
+			s, mock, err := newServerWithChartsAndReleases(t, nil, charts, releases)
 			if err != nil {
 				t.Fatalf("%+v", err)
+			}
+
+			if tc.defaultUpgradePolicyStr != "" {
+				policy, err := pkgutils.UpgradePolicyFromString(tc.defaultUpgradePolicyStr)
+				if err != nil {
+					t.Fatal(err)
+				} else {
+					s.pluginConfig.DefaultUpgradePolicy = policy
+				}
 			}
 
 			response, err := s.UpdateInstalledPackage(context.Background(), tc.request)
@@ -1075,18 +1156,13 @@ func newChartsAndReleases(t *testing.T, existingK8sObjs []testSpecGetInstalledPa
 			Interval: metav1.Duration{Duration: 1 * time.Minute},
 		}
 
-		lastTransitionTime, err := time.Parse(time.RFC3339, "2021-08-12T03:25:38Z")
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
-
 		chartStatus := &sourcev1.HelmChartStatus{
 			Conditions: []metav1.Condition{
 				{
 					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
 					Message:            "Fetched revision: " + existing.chartSpecVersion,
-					Type:               "Ready",
-					Status:             "True",
+					Type:               fluxmeta.ReadyCondition,
+					Status:             metav1.ConditionTrue,
 					Reason:             sourcev1.ChartPullSucceededReason,
 				},
 			},
@@ -1184,47 +1260,24 @@ func newRelease(name string, namespace string, spec *helmv2.HelmReleaseSpec, sta
 }
 
 func newServerWithChartsAndReleases(t *testing.T, actionConfig *action.Configuration, charts []sourcev1.HelmChart, releases []helmv2.HelmRelease) (*Server, redismock.ClientMock, error) {
+	typedClient := typfake.NewSimpleClientset()
+	// Creating an authorized clientGetter
+	typedClient.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, &authorizationv1.SelfSubjectAccessReview{
+			Status: authorizationv1.SubjectAccessReviewStatus{Allowed: true},
+		}, nil
+	})
+
 	apiextIfc := apiextfake.NewSimpleClientset(fluxHelmRepositoryCRD)
-
-	// register the GitOps Toolkit schema definitions
-	scheme := runtime.NewScheme()
-	_ = sourcev1.AddToScheme(scheme)
-	_ = helmv2.AddToScheme(scheme)
-
-	rm := apimeta.NewDefaultRESTMapper([]schema.GroupVersion{sourcev1.GroupVersion, helmv2.GroupVersion})
-	rm.Add(schema.GroupVersionKind{
-		Group:   sourcev1.GroupVersion.Group,
-		Version: sourcev1.GroupVersion.Version,
-		Kind:    sourcev1.HelmRepositoryKind},
-		apimeta.RESTScopeNamespace)
-	rm.Add(schema.GroupVersionKind{
-		Group:   sourcev1.GroupVersion.Group,
-		Version: sourcev1.GroupVersion.Version,
-		Kind:    sourcev1.HelmChartKind},
-		apimeta.RESTScopeNamespace)
-	rm.Add(schema.GroupVersionKind{
-		Group:   helmv2.GroupVersion.Group,
-		Version: helmv2.GroupVersion.Version,
-		Kind:    helmv2.HelmReleaseKind},
-		apimeta.RESTScopeNamespace)
-
-	ctrlClientBuilder := ctrlfake.NewClientBuilder().WithScheme(scheme).WithRESTMapper(rm)
-	if len(charts) > 0 {
-		ctrlClientBuilder = ctrlClientBuilder.WithLists(&sourcev1.HelmChartList{Items: charts})
-	}
-	if len(releases) > 0 {
-		ctrlClientBuilder = ctrlClientBuilder.WithLists(&helmv2.HelmReleaseList{Items: releases})
-	}
-	ctrlClient := &withWatchWrapper{delegate: ctrlClientBuilder.Build()}
-
+	ctrlClient := newCtrlClient(nil, charts, releases)
 	clientGetter := func(context.Context, string) (clientgetter.ClientInterfaces, error) {
 		return clientgetter.
 			NewBuilder().
 			WithApiExt(apiextIfc).
-			WithControllerRuntime(ctrlClient).
+			WithTyped(typedClient).
+			WithControllerRuntime(&ctrlClient).
 			Build(), nil
 	}
-
 	return newServer(t, clientGetter, actionConfig, nil, nil)
 }
 
@@ -1274,779 +1327,3 @@ func newHelmActionConfig(t *testing.T, namespace string, rels []helmReleaseStub)
 
 	return actionConfig
 }
-
-// misc global vars that get re-used in multiple tests scenarios
-var (
-	releasesGvr = schema.GroupVersionResource{
-		Group:    helmv2.GroupVersion.Group,
-		Version:  helmv2.GroupVersion.Version,
-		Resource: fluxHelmReleases,
-	}
-
-	statusInstalled = &corev1.InstalledPackageStatus{
-		Ready:      true,
-		Reason:     corev1.InstalledPackageStatus_STATUS_REASON_INSTALLED,
-		UserReason: "ReconciliationSucceeded: Release reconciliation succeeded",
-	}
-
-	my_redis_ref = installedRef("my-redis", "test")
-
-	redis_summary_installed = &corev1.InstalledPackageSummary{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		IconUrl:             "https://bitnami.com/assets/stacks/redis/img/redis-stack-220x234.png",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "14.4.0",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-		PkgDisplayName:   "redis",
-		ShortDescription: "Open source, advanced key-value store. It is often referred to as a data structure server since keys can contain strings, hashes, lists, sets and sorted sets.",
-		Status:           statusInstalled,
-		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-	}
-
-	redis_summary_failed = &corev1.InstalledPackageSummary{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		IconUrl:             "https://bitnami.com/assets/stacks/redis/img/redis-stack-220x234.png",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "14.4.0",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-		PkgDisplayName:   "redis",
-		ShortDescription: "Open source, advanced key-value store. It is often referred to as a data structure server since keys can contain strings, hashes, lists, sets and sorted sets.",
-		Status: &corev1.InstalledPackageStatus{
-			Ready:      false,
-			Reason:     corev1.InstalledPackageStatus_STATUS_REASON_FAILED,
-			UserReason: "InstallFailed: install retries exhausted",
-		},
-		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-	}
-
-	redis_summary_pending = &corev1.InstalledPackageSummary{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		IconUrl:             "https://bitnami.com/assets/stacks/redis/img/redis-stack-220x234.png",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "14.4.0",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-		PkgDisplayName:   "redis",
-		ShortDescription: "Open source, advanced key-value store. It is often referred to as a data structure server since keys can contain strings, hashes, lists, sets and sorted sets.",
-		Status: &corev1.InstalledPackageStatus{
-			Ready:      false,
-			Reason:     corev1.InstalledPackageStatus_STATUS_REASON_PENDING,
-			UserReason: "Progressing: reconciliation in progress",
-		},
-		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-	}
-
-	redis_summary_pending_2 = &corev1.InstalledPackageSummary{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		IconUrl:             "https://bitnami.com/assets/stacks/redis/img/redis-stack-220x234.png",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "14.4.0",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-		PkgDisplayName:   "redis",
-		ShortDescription: "Open source, advanced key-value store. It is often referred to as a data structure server since keys can contain strings, hashes, lists, sets and sorted sets.",
-		Status: &corev1.InstalledPackageStatus{
-			Ready:      false,
-			Reason:     corev1.InstalledPackageStatus_STATUS_REASON_PENDING,
-			UserReason: "ArtifactFailed: HelmChart 'default/kubeapps-my-redis' is not ready",
-		},
-		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-	}
-
-	airflow_summary_installed = &corev1.InstalledPackageSummary{
-		InstalledPackageRef: installedRef("my-airflow", "namespace-2"),
-		Name:                "my-airflow",
-		IconUrl:             "https://bitnami.com/assets/stacks/airflow/img/airflow-stack-110x117.png",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "6.7.1",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.7.1",
-			AppVersion: "1.10.12",
-		},
-		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: "10.2.1",
-			AppVersion: "2.1.0",
-		},
-		ShortDescription: "Apache Airflow is a platform to programmatically author, schedule and monitor workflows.",
-		PkgDisplayName:   "airflow",
-		Status:           statusInstalled,
-	}
-
-	redis_summary_latest = &corev1.InstalledPackageSummary{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		IconUrl:             "https://bitnami.com/assets/stacks/redis/img/redis-stack-220x234.png",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "*",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-		PkgDisplayName:   "redis",
-		ShortDescription: "Open source, advanced key-value store. It is often referred to as a data structure server since keys can contain strings, hashes, lists, sets and sorted sets.",
-		Status:           statusInstalled,
-		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "6.2.4",
-		},
-	}
-
-	airflow_summary_semver = &corev1.InstalledPackageSummary{
-		InstalledPackageRef: installedRef("my-airflow", "namespace-2"),
-		Name:                "my-airflow",
-		IconUrl:             "https://bitnami.com/assets/stacks/airflow/img/airflow-stack-110x117.png",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "<=6.7.1",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.7.1",
-			AppVersion: "1.10.12",
-		},
-		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: "10.2.1",
-			AppVersion: "2.1.0",
-		},
-		ShortDescription: "Apache Airflow is a platform to programmatically author, schedule and monitor workflows.",
-		PkgDisplayName:   "airflow",
-		Status:           statusInstalled,
-	}
-
-	lastTransitionTime, _ = time.Parse(time.RFC3339, "2021-08-11T08:46:03Z")
-
-	redis_existing_spec_completed = testSpecGetInstalledPackages{
-		repoName:             "bitnami-1",
-		repoNamespace:        "default",
-		repoIndex:            "testdata/redis-many-versions.yaml",
-		chartName:            "redis",
-		chartTarGz:           "testdata/redis-14.4.0.tgz",
-		chartSpecVersion:     "14.4.0",
-		chartArtifactVersion: "14.4.0",
-		releaseName:          "my-redis",
-		releaseNamespace:     "test",
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "True",
-					Reason:             "ReconciliationSucceeded",
-					Message:            "Release reconciliation succeeded",
-				},
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Released",
-					Status:             "True",
-					Reason:             helmv2.InstallSucceededReason,
-					Message:            "Helm install succeeded",
-				},
-			},
-			HelmChart:             "default/redis",
-			LastAppliedRevision:   "14.4.0",
-			LastAttemptedRevision: "14.4.0",
-		},
-	}
-
-	redis_existing_stub_completed = helmReleaseStub{
-		name:         "my-redis",
-		namespace:    "test",
-		chartVersion: "14.4.0",
-		notes:        "some notes",
-		status:       release.StatusDeployed,
-	}
-
-	redis_existing_spec_completed_with_values_and_reconciliation_options_values_bytes, _ = json.Marshal(
-		map[string]interface{}{
-			"replica": map[string]interface{}{
-				"replicaCount":  "1",
-				"configuration": "xyz",
-			}})
-
-	redis_existing_spec_completed_with_values_and_reconciliation_options = testSpecGetInstalledPackages{
-		repoName:                  "bitnami-1",
-		repoNamespace:             "default",
-		repoIndex:                 "testdata/redis-many-versions.yaml",
-		chartName:                 "redis",
-		chartTarGz:                "testdata/redis-14.4.0.tgz",
-		chartSpecVersion:          "14.4.0",
-		chartArtifactVersion:      "14.4.0",
-		releaseName:               "my-redis",
-		releaseNamespace:          "test",
-		releaseSuspend:            true,
-		releaseServiceAccountName: "foo",
-		releaseValues:             &v1.JSON{Raw: redis_existing_spec_completed_with_values_and_reconciliation_options_values_bytes},
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "True",
-					Reason:             "ReconciliationSucceeded",
-					Message:            "Release reconciliation succeeded",
-				},
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Released",
-					Status:             "True",
-					Reason:             helmv2.InstallSucceededReason,
-					Message:            "Helm install succeeded",
-				},
-			},
-			HelmChart:             "default/redis",
-			LastAppliedRevision:   "14.4.0",
-			LastAttemptedRevision: "14.4.0",
-		},
-	}
-
-	redis_existing_spec_failed = testSpecGetInstalledPackages{
-		repoName:             "bitnami-1",
-		repoNamespace:        "default",
-		repoIndex:            "testdata/redis-many-versions.yaml",
-		chartName:            "redis",
-		chartTarGz:           "testdata/redis-14.4.0.tgz",
-		chartSpecVersion:     "14.4.0",
-		chartArtifactVersion: "14.4.0",
-		releaseName:          "my-redis",
-		releaseNamespace:     "test",
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "False",
-					Reason:             helmv2.InstallFailedReason,
-					Message:            "install retries exhausted",
-				},
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Released",
-					Status:             "False",
-					Reason:             helmv2.InstallFailedReason,
-					Message:            "Helm install failed: unable to build kubernetes objects from release manifest: error validating \"\": error validating data: ValidationError(Deployment.spec.replicas): invalid type for io.k8s.api.apps.v1.DeploymentSpec.replicas: got \"string\", expected \"integer\"",
-				},
-			},
-			HelmChart:             "default/redis",
-			Failures:              14,
-			InstallFailures:       1,
-			LastAttemptedRevision: "14.4.0",
-		},
-	}
-
-	redis_existing_stub_failed = helmReleaseStub{
-		name:         "my-redis",
-		namespace:    "test",
-		chartVersion: "14.4.0",
-		notes:        "some notes",
-		status:       release.StatusFailed,
-	}
-
-	airflow_existing_spec_completed = testSpecGetInstalledPackages{
-		repoName:             "bitnami-2",
-		repoNamespace:        "default",
-		repoIndex:            "testdata/airflow-many-versions.yaml",
-		chartName:            "airflow",
-		chartTarGz:           "testdata/airflow-6.7.1.tgz",
-		chartSpecVersion:     "6.7.1",
-		chartArtifactVersion: "6.7.1",
-		releaseName:          "my-airflow",
-		releaseNamespace:     "namespace-2",
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "True",
-					Reason:             "ReconciliationSucceeded",
-					Message:            "Release reconciliation succeeded",
-				},
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Released",
-					Status:             "True",
-					Reason:             helmv2.InstallSucceededReason,
-					Message:            "Helm install succeeded",
-				},
-			},
-			HelmChart:             "default/airflow",
-			LastAppliedRevision:   "6.7.1",
-			LastAttemptedRevision: "6.7.1",
-		},
-	}
-
-	airflow_existing_spec_semver = testSpecGetInstalledPackages{
-		repoName:             "bitnami-2",
-		repoNamespace:        "default",
-		repoIndex:            "testdata/airflow-many-versions.yaml",
-		chartName:            "airflow",
-		chartTarGz:           "testdata/airflow-6.7.1.tgz",
-		chartSpecVersion:     "<=6.7.1",
-		chartArtifactVersion: "6.7.1",
-		releaseName:          "my-airflow",
-		releaseNamespace:     "namespace-2",
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "True",
-					Reason:             "ReconciliationSucceeded",
-					Message:            "Release reconciliation succeeded",
-				},
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Released",
-					Status:             "True",
-					Reason:             helmv2.InstallSucceededReason,
-					Message:            "Helm install succeeded",
-				},
-			},
-			HelmChart:             "default/airflow",
-			LastAppliedRevision:   "6.7.1",
-			LastAttemptedRevision: "6.7.1",
-		},
-	}
-
-	redis_existing_spec_pending = testSpecGetInstalledPackages{
-		repoName:             "bitnami-1",
-		repoNamespace:        "default",
-		repoIndex:            "testdata/redis-many-versions.yaml",
-		chartName:            "redis",
-		chartTarGz:           "testdata/redis-14.4.0.tgz",
-		chartSpecVersion:     "14.4.0",
-		chartArtifactVersion: "14.4.0",
-		releaseName:          "my-redis",
-		releaseNamespace:     "test",
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "Unknown",
-					Reason:             "Progressing",
-					Message:            "reconciliation in progress",
-				},
-			},
-			HelmChart:             "default/redis",
-			LastAttemptedRevision: "14.4.0",
-		},
-	}
-
-	redis_existing_spec_pending_2 = testSpecGetInstalledPackages{
-		repoName:             "bitnami-1",
-		repoNamespace:        "default",
-		repoIndex:            "testdata/redis-many-versions.yaml",
-		chartName:            "redis",
-		chartTarGz:           "testdata/redis-14.4.0.tgz",
-		chartSpecVersion:     "14.4.0",
-		chartArtifactVersion: "14.4.0",
-		releaseName:          "my-redis",
-		releaseNamespace:     "test",
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "False",
-					Reason:             helmv2.ArtifactFailedReason,
-					Message:            "HelmChart 'default/kubeapps-my-redis' is not ready",
-				},
-			},
-			HelmChart:             "default/redis",
-			Failures:              2,
-			LastAttemptedRevision: "14.4.0",
-		},
-	}
-
-	redis_existing_stub_pending = helmReleaseStub{
-		name:         "my-redis",
-		namespace:    "test",
-		chartVersion: "14.4.0",
-		notes:        "some notes",
-		status:       release.StatusPendingInstall,
-	}
-
-	redis_existing_spec_latest = testSpecGetInstalledPackages{
-		repoName:             "bitnami-1",
-		repoNamespace:        "default",
-		repoIndex:            "testdata/redis-many-versions.yaml",
-		chartName:            "redis",
-		chartTarGz:           "testdata/redis-14.4.0.tgz",
-		chartSpecVersion:     "*",
-		chartArtifactVersion: "14.4.0",
-		releaseName:          "my-redis",
-		releaseNamespace:     "test",
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "True",
-					Reason:             "ReconciliationSucceeded",
-					Message:            "Release reconciliation succeeded",
-				},
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Released",
-					Status:             "True",
-					Reason:             helmv2.InstallSucceededReason,
-					Message:            "Helm install succeeded",
-				},
-			},
-			HelmChart:             "default/redis",
-			LastAppliedRevision:   "14.4.0",
-			LastAttemptedRevision: "14.4.0",
-		},
-	}
-
-	redis_detail_failed = &corev1.InstalledPackageDetail{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "14.4.0",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "1.2.3",
-		},
-		ReconciliationOptions: &corev1.ReconciliationOptions{
-			Interval: 60,
-		},
-		Status: &corev1.InstalledPackageStatus{
-			Ready:      false,
-			Reason:     corev1.InstalledPackageStatus_STATUS_REASON_FAILED,
-			UserReason: "InstallFailed: install retries exhausted",
-		},
-		AvailablePackageRef:   availableRef("bitnami-1/redis", "default"),
-		PostInstallationNotes: "some notes",
-	}
-
-	redis_detail_pending = &corev1.InstalledPackageDetail{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "14.4.0",
-		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "14.4.0",
-			AppVersion: "1.2.3",
-		},
-		ReconciliationOptions: &corev1.ReconciliationOptions{
-			Interval: 60,
-		},
-		Status: &corev1.InstalledPackageStatus{
-			Ready:      false,
-			Reason:     corev1.InstalledPackageStatus_STATUS_REASON_PENDING,
-			UserReason: "Progressing: reconciliation in progress",
-		},
-		AvailablePackageRef:   availableRef("bitnami-1/redis", "default"),
-		PostInstallationNotes: "some notes",
-	}
-
-	redis_detail_completed = &corev1.InstalledPackageDetail{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		CurrentVersion: &corev1.PackageAppVersion{
-			AppVersion: "1.2.3",
-			PkgVersion: "14.4.0",
-		},
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "14.4.0",
-		},
-		ReconciliationOptions: &corev1.ReconciliationOptions{
-			Interval: 60,
-		},
-		Status:                statusInstalled,
-		AvailablePackageRef:   availableRef("bitnami-1/redis", "default"),
-		PostInstallationNotes: "some notes",
-	}
-
-	redis_detail_completed_with_values_and_reconciliation_options = &corev1.InstalledPackageDetail{
-		InstalledPackageRef: my_redis_ref,
-		Name:                "my-redis",
-		CurrentVersion: &corev1.PackageAppVersion{
-			AppVersion: "1.2.3",
-			PkgVersion: "14.4.0",
-		},
-		PkgVersionReference: &corev1.VersionReference{
-			Version: "14.4.0",
-		},
-		ReconciliationOptions: &corev1.ReconciliationOptions{
-			Interval:           60,
-			Suspend:            true,
-			ServiceAccountName: "foo",
-		},
-		Status:                statusInstalled,
-		ValuesApplied:         "{\"replica\": { \"replicaCount\":  \"1\", \"configuration\": \"xyz\"    }}",
-		AvailablePackageRef:   availableRef("bitnami-1/redis", "default"),
-		PostInstallationNotes: "some notes",
-	}
-
-	flux_helm_release_basic = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "podinfo",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
-
-	flux_helm_release_semver_constraint = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "podinfo",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-					Version: "> 5",
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
-
-	flux_helm_release_reconcile_options = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "podinfo",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-				},
-			},
-			Interval:           metav1.Duration{Duration: 1 * time.Minute},
-			ServiceAccountName: "foo",
-			Suspend:            false,
-		},
-	}
-
-	flux_helm_release_values_values_bytes, _ = json.Marshal(
-		map[string]interface{}{
-			"ui": map[string]interface{}{
-				"message": "what we do in the shadows",
-			}})
-
-	flux_helm_release_values = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "podinfo",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-			Values:   &v1.JSON{Raw: flux_helm_release_values_values_bytes},
-		},
-	}
-
-	create_installed_package_resp_my_podinfo = &corev1.CreateInstalledPackageResponse{
-		InstalledPackageRef: installedRef("my-podinfo", "test"),
-	}
-
-	flux_helm_release_updated_1 = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-redis",
-			Namespace:       "test",
-			Generation:      int64(1),
-			ResourceVersion: "1000",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "redis",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "bitnami-1",
-						Namespace: "default",
-					},
-					Version: ">14.4.0",
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
-
-	flux_helm_release_updated_2 = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-redis",
-			Namespace:       "test",
-			Generation:      int64(1),
-			ResourceVersion: "1000",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "redis",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "bitnami-1",
-						Namespace: "default",
-					},
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-			Values:   &v1.JSON{Raw: flux_helm_release_values_values_bytes},
-		},
-	}
-
-	redis_existing_spec_target_ns_is_set = testSpecGetInstalledPackages{
-		repoName:             "bitnami-1",
-		repoNamespace:        "default",
-		repoIndex:            "testdata/redis-many-versions.yaml",
-		chartName:            "redis",
-		chartTarGz:           "testdata/redis-14.4.0.tgz",
-		chartSpecVersion:     "14.4.0",
-		chartArtifactVersion: "14.4.0",
-		releaseName:          "my-redis",
-		releaseNamespace:     "test",
-		releaseStatus: helmv2.HelmReleaseStatus{
-			Conditions: []metav1.Condition{
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Ready",
-					Status:             "True",
-					Reason:             "ReconciliationSucceeded",
-					Message:            "Release reconciliation succeeded",
-				},
-				{
-					LastTransitionTime: metav1.Time{Time: lastTransitionTime},
-					Type:               "Released",
-					Status:             "True",
-					Reason:             helmv2.InstallSucceededReason,
-					Message:            "Helm install succeeded",
-				},
-			},
-			HelmChart:             "default/redis",
-			LastAppliedRevision:   "14.4.0",
-			LastAttemptedRevision: "14.4.0",
-		},
-		targetNamespace: "test2",
-	}
-
-	redis_existing_stub_target_ns_is_set = helmReleaseStub{
-		name:         "test2-my-redis",
-		namespace:    "test2",
-		chartVersion: "14.4.0",
-		notes:        "some notes",
-		status:       release.StatusDeployed,
-	}
-
-	flux_helm_release_updated_target_ns_is_set = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-redis",
-			Namespace:       "test",
-			Generation:      int64(1),
-			ResourceVersion: "1000",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "redis",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "bitnami-1",
-						Namespace: "default",
-					},
-					Version: ">14.4.0",
-				},
-			},
-			Interval:        metav1.Duration{Duration: 1 * time.Minute},
-			TargetNamespace: "test2",
-		},
-	}
-)

@@ -81,8 +81,8 @@ replaceImage_latestToProduction() {
 
     # Replace image and tag from the values.yaml
     sed -i.bk -e '1h;2,$H;$!d;g' -re \
-        's/repository: '${currentImageEscaped}'\n    tag: latest/repository: '${targetImageEscaped}'\n    tag: '${tag}'/g' \
-        "${FILE}"
+    's/repository: '${currentImageEscaped}'\n    tag: latest/repository: '${targetImageEscaped}'\n    tag: '${tag}'/g' \
+    "${FILE}"
     rm "${FILE}.bk"
 }
 
@@ -104,8 +104,8 @@ replaceImage_productionToLatest() {
 
     # Replace image and tag from the values.yaml
     sed -i.bk -e '1h;2,$H;$!d;g' -re \
-        's/repository: '${currentImageEscaped}'\n    tag: \S*/repository: '${targetImageEscaped}'\n    tag: latest/g' \
-        "${FILE}"
+    's/repository: '${currentImageEscaped}'\n    tag: \S*/repository: '${targetImageEscaped}'\n    tag: latest/g' \
+    "${FILE}"
     rm "${FILE}.bk"
 }
 
@@ -166,8 +166,7 @@ updateRepoWithRemoteChanges() {
     git -C "${TARGET_REPO}" pull upstream "${BRANCH_CHARTS_REPO_ORIGINAL}"
 
     # https://superuser.com/questions/232373/how-to-tell-git-which-private-key-to-use
-    git -C "${TARGET_REPO}" config --local core.sshCommand "ssh -i ~/.ssh/${FORKED_SSH_KEY_FILENAME} -F /dev/null"
-    git -C "${TARGET_REPO}" push origin "${BRANCH_CHARTS_REPO_FORKED}"
+    GIT_SSH_COMMAND="ssh -i ~/.ssh/${FORKED_SSH_KEY_FILENAME}" git -C "${TARGET_REPO}" push origin "${BRANCH_CHARTS_REPO_FORKED}"
 
     rm -rf "${KUBEAPPS_CHART_DIR}"
     cp -R "${targetChartPath}" "${KUBEAPPS_CHART_DIR}"
@@ -183,6 +182,21 @@ updateRepoWithRemoteChanges() {
     replaceImage_productionToLatest kubeops "${KUBEAPPS_CHART_DIR}/values.yaml"
     replaceImage_productionToLatest pinniped-proxy "${KUBEAPPS_CHART_DIR}/values.yaml"
     replaceImage_productionToLatest kubeapps-apis "${KUBEAPPS_CHART_DIR}/values.yaml"
+}
+
+generateReadme() {
+    local README_GENERATOR_REPO=${1:?}
+    local CHART_PATH=${2:?}
+
+    TMP_DIR=$(mktemp -u)/readme
+    local chartReadmePath="${CHART_PATH}/README.md"
+    local chartValuesPath="${CHART_PATH}/values.yaml"
+
+    git clone "https://github.com/${README_GENERATOR_REPO}" "${TMP_DIR}" --depth 1 --no-single-branch
+
+    cd "${TMP_DIR}"
+    npm install --production
+    node bin/index.js -r "${chartReadmePath}" -v "${chartValuesPath}"
 }
 
 commitAndSendExternalPR() {
@@ -209,7 +223,7 @@ commitAndSendExternalPR() {
     sed -i.bk -e "s/<EMAIL>/$(git config user.email)/g" "${PR_EXTERNAL_TEMPLATE_FILE}"
     git checkout -b "${TARGET_BRANCH}"
     git add --all .
-    git commit -m "kubeapps: bump chart version to ${CHART_VERSION}"
+    git commit --signoff -m "kubeapps: bump chart version to ${CHART_VERSION}"
     # NOTE: This expects to have a loaded SSH key
     if [[ $(git ls-remote origin "${TARGET_BRANCH}" | wc -l) -eq 0 ]]; then
         git push -u origin "${TARGET_BRANCH}"
@@ -242,7 +256,7 @@ commitAndSendInternalPR() {
     fi
     git checkout -b "${TARGET_BRANCH}"
     git add --all .
-    git commit -m "bump chart version to ${CHART_VERSION}"
+    git commit --signoff -m "bump chart version to ${CHART_VERSION}"
     # NOTE: This expects to have a loaded SSH key
     if [[ $(git ls-remote origin "${TARGET_BRANCH}" | wc -l) -eq 0 ]]; then
         git push -u origin "${TARGET_BRANCH}"
