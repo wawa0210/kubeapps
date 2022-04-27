@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -118,7 +119,7 @@ func TestKindClusterCreateInstalledPackage(t *testing.T) {
 		},
 	}
 
-	grpcContext, err := newGrpcAdminContext(t, "test-create-admin", "default")
+	grpcContext, err := newGrpcAdminContext(t, "test-create-admin"+randSeq(4), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,22 +131,20 @@ func TestKindClusterCreateInstalledPackage(t *testing.T) {
 	}
 }
 
-type integrationTestUpdatePackageSpec struct {
-	integrationTestCreatePackageSpec
-	request *corev1.UpdateInstalledPackageRequest
-	// this is expected AFTER the update call completes
-	expectedDetailAfterUpdate *corev1.InstalledPackageDetail
-	expectedRefsAfterUpdate   []*corev1.ResourceRef
-	unauthorized              bool
-}
-
 func TestKindClusterUpdateInstalledPackage(t *testing.T) {
 	fluxPluginClient, _, err := checkEnv(t)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	testCases := []integrationTestUpdatePackageSpec{
+	testCases := []struct {
+		integrationTestCreatePackageSpec
+		request *corev1.UpdateInstalledPackageRequest
+		// this is expected AFTER the update call completes
+		expectedDetailAfterUpdate *corev1.InstalledPackageDetail
+		expectedRefsAfterUpdate   []*corev1.ResourceRef
+		unauthorized              bool
+	}{
 		{
 			integrationTestCreatePackageSpec: integrationTestCreatePackageSpec{
 				testName:             "update test (simplest case)",
@@ -223,9 +222,21 @@ func TestKindClusterUpdateInstalledPackage(t *testing.T) {
 			request:      update_request_6,
 			unauthorized: true,
 		},
+		{
+			integrationTestCreatePackageSpec: integrationTestCreatePackageSpec{
+				testName:             "update installed package in failed state is allowed",
+				repoUrl:              podinfo_repo_url,
+				request:              create_request_podinfo_8,
+				expectedDetail:       expected_detail_podinfo_8,
+				expectInstallFailure: true,
+			},
+			request:                   update_request_7,
+			expectedDetailAfterUpdate: expected_detail_podinfo_9,
+			expectedRefsAfterUpdate:   expected_resource_refs_podinfo_9,
+		},
 	}
 
-	grpcContext, err := newGrpcAdminContext(t, "test-create-admin", "default")
+	grpcContext, err := newGrpcAdminContext(t, "test-update-admin-"+randSeq(4), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,14 +252,35 @@ func TestKindClusterUpdateInstalledPackage(t *testing.T) {
 			if tc.unauthorized {
 				ctx = context.TODO()
 			}
-			_, err := fluxPluginClient.UpdateInstalledPackage(ctx, tc.request)
-			if tc.unauthorized {
-				if status.Code(err) != codes.Unauthenticated {
-					t.Fatalf("Expected Unathenticated, got: %v", status.Code(err))
+
+			// Every once in a while (very infrequently, like 1 out of 25 tries)
+			// I get rpc error: code = Internal desc = unable to update the HelmRelease
+			// 'test-12-i7a4/my-podinfo-12' due to 'Operation cannot be fulfilled on
+			// helmreleases.helm.toolkit.fluxcd.io "my-podinfo-12": the object has been
+			// modified; please apply your changes to the latest version and try again'
+			// ... so this is the reason for the loop loop with retries
+			var i, maxRetries = 0, 5
+			for ; i < maxRetries; i++ {
+				_, err := fluxPluginClient.UpdateInstalledPackage(ctx, tc.request)
+				if tc.unauthorized {
+					if status.Code(err) != codes.Unauthenticated {
+						t.Fatalf("Expected Unathenticated, got: %v", status.Code(err))
+					}
+					return // done, nothing more to check
+				} else if err != nil {
+					if strings.Contains(err.Error(), " the object has been modified; please apply your changes to the latest version and try again") {
+						waitTime := int64(math.Pow(2, float64(i)))
+						t.Logf("Retrying update in [%d] sec due to %s...", waitTime, err.Error())
+						time.Sleep(time.Duration(waitTime) * time.Second)
+					} else {
+						t.Fatalf("%+v", err)
+					}
+				} else {
+					break
 				}
-				return // done, nothing more to check
-			} else if err != nil {
-				t.Fatalf("%+v", err)
+			}
+			if i == maxRetries {
+				t.Fatalf("Update retries exhaused for package [%s], last error: [%v]", installedRef, err)
 			}
 
 			actualRespAfterUpdate, actualRefsAfterUpdate :=
@@ -308,7 +340,7 @@ func TestKindClusterAutoUpdateInstalledPackage(t *testing.T) {
 		expectedResourceRefs: expected_resource_refs_auto_update,
 	}
 
-	grpcContext, err := newGrpcAdminContext(t, "test-auto-update", "default")
+	grpcContext, err := newGrpcAdminContext(t, "test-auto-update"+randSeq(4), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,18 +398,16 @@ func TestKindClusterAutoUpdateInstalledPackage(t *testing.T) {
 		})
 }
 
-type integrationTestDeletePackageSpec struct {
-	integrationTestCreatePackageSpec
-	unauthorized bool
-}
-
 func TestKindClusterDeleteInstalledPackage(t *testing.T) {
 	fluxPluginClient, _, err := checkEnv(t)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	testCases := []integrationTestDeletePackageSpec{
+	testCases := []struct {
+		integrationTestCreatePackageSpec
+		unauthorized bool
+	}{
 		{
 			integrationTestCreatePackageSpec: integrationTestCreatePackageSpec{
 				testName:             "delete test (simplest case)",
@@ -403,7 +433,7 @@ func TestKindClusterDeleteInstalledPackage(t *testing.T) {
 		},
 	}
 
-	grpcContext, err := newGrpcAdminContext(t, "test-delete-admin", "default")
+	grpcContext, err := newGrpcAdminContext(t, "test-delete-admin"+randSeq(4), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,24 +560,24 @@ func TestKindClusterRBAC_ReadRelease(t *testing.T) {
 		}
 	})
 
-	grpcCtxAdmin, err := newGrpcAdminContext(t, "test-release-rbac-admin", "default")
+	adminAcctName := "test-release-rbac-admin-" + randSeq(4)
+	grpcCtxAdmin, err := newGrpcAdminContext(t, adminAcctName, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	loserAcctName := "test-release-rbac-loser-" + randSeq(4)
 	grpcCtxLoser, err := newGrpcContextForServiceAccountWithoutAccessToAnyNamespace(
-		t, "test-release-rbac-loser", "default")
+		t, loserAcctName, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	out := kubectlCanI(
-		t, "test-release-rbac-admin", "default", "get", "helmcharts", ns1)
+	out := kubectlCanI(t, adminAcctName, "default", "get", "helmcharts", ns1)
 	if out != "yes" {
 		t.Errorf("Expected [yes], got [%s]", out)
 	}
-	out = kubectlCanI(
-		t, "test-release-rbac-loser", "default", "get", "helmcharts", ns1)
+	out = kubectlCanI(t, loserAcctName, "default", "get", "helmcharts", ns1)
 	if out != "no" {
 		t.Errorf("Expected [no], got [%s]", out)
 	}
@@ -576,8 +606,7 @@ func TestKindClusterRBAC_ReadRelease(t *testing.T) {
 
 	ns2 := tc.request.TargetContext.Namespace
 
-	out = kubectlCanI(
-		t, "test-release-rbac-admin", "default", "get", fluxHelmReleases, ns2)
+	out = kubectlCanI(t, adminAcctName, "default", "get", fluxHelmReleases, ns2)
 	if out != "yes" {
 		t.Errorf("Expected [yes], got [%s]", out)
 	}
@@ -645,8 +674,7 @@ func TestKindClusterRBAC_ReadRelease(t *testing.T) {
 		}
 	}
 
-	out = kubectlCanI(
-		t, "test-release-rbac-loser", "default", "get", fluxHelmReleases, ns2)
+	out = kubectlCanI(t, loserAcctName, "default", "get", fluxHelmReleases, ns2)
 	if out != "no" {
 		t.Errorf("Expected [no], got [%s]", out)
 	}
@@ -711,24 +739,22 @@ func TestKindClusterRBAC_ReadRelease(t *testing.T) {
 		},
 	}
 
+	svcAcctName := "test-release-rbac-helmreleases-" + randSeq(4)
 	grpcCtxReadHelmReleases, err := newGrpcContextForServiceAccountWithRules(
-		t, "test-release-rbac-helmreleases", "default", rules)
+		t, svcAcctName, "default", rules)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	out = kubectlCanI(
-		t, "test-release-rbac-helmreleases", "default", "get", fluxHelmRepositories, ns2)
+	out = kubectlCanI(t, svcAcctName, "default", "get", fluxHelmRepositories, ns2)
 	if out != "no" {
 		t.Errorf("Expected [no], got [%s]", out)
 	}
-	out = kubectlCanI(
-		t, "test-release-rbac-helmreleases", "default", "get", "helmcharts", ns2)
+	out = kubectlCanI(t, svcAcctName, "default", "get", "helmcharts", ns2)
 	if out != "no" {
 		t.Errorf("Expected [no], got [%s]", out)
 	}
-	out = kubectlCanI(
-		t, "test-release-rbac-helmreleases", "default", "get", fluxHelmReleases, ns2)
+	out = kubectlCanI(t, svcAcctName, "default", "get", fluxHelmReleases, ns2)
 	if out != "yes" {
 		t.Errorf("Expected [yes], got [%s]", out)
 	}
@@ -817,19 +843,18 @@ func TestKindClusterRBAC_ReadRelease(t *testing.T) {
 		},
 	}
 
+	svcAcctName2 := "test-release-rbac-helmreleases-and-charts-" + randSeq(4)
 	grpcCtxReadHelmReleasesAndCharts, err := newGrpcContextForServiceAccountWithRules(
-		t, "test-release-rbac-helmreleases-and-charts", "default", nsToRules)
+		t, svcAcctName2, "default", nsToRules)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	out = kubectlCanI(
-		t, "test-release-rbac-helmreleases-and-charts", "default", "get", "helmcharts", ns1)
+	out = kubectlCanI(t, svcAcctName2, "default", "get", "helmcharts", ns1)
 	if out != "yes" {
 		t.Errorf("Expected [yes], got [%s]", out)
 	}
-	out = kubectlCanI(
-		t, "test-release-rbac-helmreleases-and-charts", "default", "get", fluxHelmReleases, ns2)
+	out = kubectlCanI(t, svcAcctName2, "default", "get", fluxHelmReleases, ns2)
 	if out != "yes" {
 		t.Errorf("Expected [yes], got [%s]", out)
 	}
@@ -901,8 +926,9 @@ func TestKindClusterRBAC_CreateRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	loserAcctName := "test-release-rbac-loser-" + randSeq(4)
 	grpcCtxLoser, err := newGrpcContextForServiceAccountWithoutAccessToAnyNamespace(
-		t, "test-release-rbac-loser", "default")
+		t, loserAcctName, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -917,17 +943,17 @@ func TestKindClusterRBAC_CreateRelease(t *testing.T) {
 		}
 	})
 
-	out := kubectlCanI(t, "test-release-rbac-loser", "default", "get", "helmcharts", ns2)
+	out := kubectlCanI(t, loserAcctName, "default", "get", "helmcharts", ns2)
 	if out != "no" {
 		t.Errorf("Expected [no], got [%s]", out)
 	}
 
-	out = kubectlCanI(t, "test-release-rbac-loser", "default", "get", "helmreleases", ns2)
+	out = kubectlCanI(t, loserAcctName, "default", "get", "helmreleases", ns2)
 	if out != "no" {
 		t.Errorf("Expected [no], got [%s]", out)
 	}
 
-	out = kubectlCanI(t, "test-release-rbac-loser", "default", "create", "helmreleases", ns2)
+	out = kubectlCanI(t, loserAcctName, "default", "create", "helmreleases", ns2)
 	if out != "no" {
 		t.Errorf("Expected [no], got [%s]", out)
 	}
@@ -958,8 +984,9 @@ func TestKindClusterRBAC_CreateRelease(t *testing.T) {
 		},
 	}
 
+	svcAcctName2 := "test-release-rbac-helmreleases-2-" + randSeq(4)
 	grpcCtx2, err := newGrpcContextForServiceAccountWithRules(
-		t, "test-release-rbac-helmreleases-2", "default", nsToRules)
+		t, svcAcctName2, "default", nsToRules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -991,8 +1018,9 @@ func TestKindClusterRBAC_CreateRelease(t *testing.T) {
 		},
 	}
 
+	svcAcctName3 := "test-release-rbac-helmreleases-3-" + randSeq(4)
 	grpcCtx3, err := newGrpcContextForServiceAccountWithRules(
-		t, "test-release-rbac-helmreleases-3", "default", nsToRules)
+		t, svcAcctName3, "default", nsToRules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1053,7 +1081,8 @@ func TestKindClusterRBAC_UpdateRelease(t *testing.T) {
 		expectedResourceRefs: expected_resource_refs_basic,
 	}
 
-	grpcCtxAdmin, err := newGrpcAdminContext(t, "test-release-rbac-admin", "default")
+	adminAcctName := "test-release-rbac-admin-" + randSeq(4)
+	grpcCtxAdmin, err := newGrpcAdminContext(t, adminAcctName, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1062,8 +1091,9 @@ func TestKindClusterRBAC_UpdateRelease(t *testing.T) {
 
 	ns2 := tc.request.TargetContext.Namespace
 
+	loserAcctName := "test-release-rbac-loser-" + randSeq(4)
 	grpcCtxLoser, err := newGrpcContextForServiceAccountWithoutAccessToAnyNamespace(
-		t, "test-release-rbac-loser", "default")
+		t, loserAcctName, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1095,8 +1125,9 @@ func TestKindClusterRBAC_UpdateRelease(t *testing.T) {
 		},
 	}
 
+	svcAcctName2 := "test-release-rbac-helmreleases-2-" + randSeq(4)
 	grpcCtx2, err := newGrpcContextForServiceAccountWithRules(
-		t, "test-release-rbac-helmreleases-2", "default", nsToRules)
+		t, svcAcctName2, "default", nsToRules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1124,8 +1155,9 @@ func TestKindClusterRBAC_UpdateRelease(t *testing.T) {
 		},
 	}
 
+	svcAcctName3 := "test-release-rbac-helmreleases-3-" + randSeq(4)
 	grpcCtx3, err := newGrpcContextForServiceAccountWithRules(
-		t, "test-release-rbac-helmreleases-3", "default", nsToRules)
+		t, svcAcctName3, "default", nsToRules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1185,7 +1217,8 @@ func TestKindClusterRBAC_DeleteRelease(t *testing.T) {
 		expectedResourceRefs: expected_resource_refs_basic,
 	}
 
-	grpcCtxAdmin, err := newGrpcAdminContext(t, "test-release-rbac-admin", "default")
+	adminAcctName := "test-release-rbac-admin-" + randSeq(4)
+	grpcCtxAdmin, err := newGrpcAdminContext(t, adminAcctName, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1194,8 +1227,9 @@ func TestKindClusterRBAC_DeleteRelease(t *testing.T) {
 
 	ns2 := tc.request.TargetContext.Namespace
 
+	loserAcctName := "test-release-rbac-loser-" + randSeq(4)
 	grpcCtxLoser, err := newGrpcContextForServiceAccountWithoutAccessToAnyNamespace(
-		t, "test-release-rbac-loser", "default")
+		t, loserAcctName, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1226,8 +1260,9 @@ func TestKindClusterRBAC_DeleteRelease(t *testing.T) {
 		},
 	}
 
+	svcAcctName := "test-release-rbac-helmreleases-3-" + randSeq(4)
 	grpcCtx3, err := newGrpcContextForServiceAccountWithRules(
-		t, "test-release-rbac-helmreleases-3", "default", nsToRules)
+		t, svcAcctName, "default", nsToRules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1421,8 +1456,8 @@ func waitUntilInstallCompletes(
 	expectInstallFailure bool) (
 	actualDetailResp *corev1.GetInstalledPackageDetailResponse,
 	actualRefsResp *corev1.GetInstalledPackageResourceRefsResponse) {
-	const maxWait = 30
-	for i := 0; i <= maxWait; i++ {
+	var i, maxRetries = 0, 30
+	for ; i < maxRetries; i++ {
 		grpcContext, cancel := context.WithTimeout(grpcContext, defaultContextTimeout)
 		defer cancel()
 		resp2, err := fluxPluginClient.GetInstalledPackageDetail(
@@ -1446,14 +1481,16 @@ func waitUntilInstallCompletes(
 			}
 		}
 		t.Logf("Waiting 2s until install completes due to: [%s], userReason: [%s], attempt: [%d/%d]...",
-			resp2.InstalledPackageDetail.Status.Reason, resp2.InstalledPackageDetail.Status.UserReason, i+1, maxWait)
+			resp2.InstalledPackageDetail.Status.Reason, resp2.InstalledPackageDetail.Status.UserReason, i+1, maxRetries)
 		time.Sleep(2 * time.Second)
 	}
 
-	if actualDetailResp == nil {
+	if i == maxRetries {
 		t.Fatalf("Timed out waiting for task to complete")
+	} else if actualDetailResp == nil {
+		t.Fatalf("Unexpected state: actual detail response is nil")
 	} else if actualDetailResp.InstalledPackageDetail.Status.Ready {
-		t.Logf("Getting installed package resource refs for [%s]...", installedPackageRef.Identifier)
+		t.Logf("Install succeeded. Now getting installed package resource refs for [%s]...", installedPackageRef.Identifier)
 		grpcContext, cancel := context.WithTimeout(grpcContext, defaultContextTimeout)
 		defer cancel()
 		var err error
@@ -1463,6 +1500,13 @@ func waitUntilInstallCompletes(
 		if err != nil {
 			t.Fatalf("%+v", err)
 		}
+	} else {
+		t.Logf("Install of [%s/%s] completed with [%s], userReason: [%s]",
+			installedPackageRef.Context.Namespace,
+			installedPackageRef.Identifier,
+			actualDetailResp.InstalledPackageDetail.Status.Reason,
+			actualDetailResp.InstalledPackageDetail.Status.UserReason,
+		)
 	}
 	return actualDetailResp, actualRefsResp
 }

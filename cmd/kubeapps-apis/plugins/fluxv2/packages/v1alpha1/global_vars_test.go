@@ -24,13 +24,7 @@ var (
 	create_request_basic = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-1/podinfo", "default"),
 		Name:                "my-podinfo",
-		TargetContext: &corev1.Context{
-			// note that Namespace is just the prefix - the actual name will
-			// have a random string appended at the end, e.g. "test-1-h23r"
-			// this will happen during the running of the test
-			Namespace: "test-1",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-1"),
 	}
 
 	// specify just the fields that cannot be easily computed based on the request
@@ -38,36 +32,17 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "*",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("6.0.0"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo"),
 	}
 
-	expected_resource_refs_basic = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo",
-		},
-	}
+	expected_resource_refs_basic = podinfo_installed_refs("my-podinfo")
 
 	create_request_semver_constraint = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-2/podinfo", "default"),
 		Name:                "my-podinfo-2",
-		TargetContext: &corev1.Context{
-			Namespace: "test-2",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-2"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "> 5",
 		},
@@ -77,36 +52,17 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "> 5",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-2 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("6.0.0"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-2"),
 	}
 
-	expected_resource_refs_semver_constraint = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-2",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-2",
-		},
-	}
+	expected_resource_refs_semver_constraint = podinfo_installed_refs("my-podinfo-2")
 
 	create_request_reconcile_options = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-3/podinfo", "default"),
 		Name:                "my-podinfo-3",
-		TargetContext: &corev1.Context{
-			Namespace: "test-3",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-3"),
 		ReconciliationOptions: &corev1.ReconciliationOptions{
 			Interval:           60,
 			Suspend:            false,
@@ -118,80 +74,42 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "*",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
+		CurrentVersion: pkgAppVersion("6.0.0"),
 		ReconciliationOptions: &corev1.ReconciliationOptions{
 			Interval:           60,
 			Suspend:            false,
 			ServiceAccountName: "foo",
 		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-3 8080:9898\n",
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-3"),
 	}
 
-	expected_resource_refs_reconcile_options = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-3",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-3",
-		},
-	}
+	expected_resource_refs_reconcile_options = podinfo_installed_refs("my-podinfo-3")
 
 	create_request_with_values = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-4/podinfo", "default"),
 		Name:                "my-podinfo-4",
-		TargetContext: &corev1.Context{
-			Namespace: "test-4",
-			Cluster:   KubeappsCluster,
-		},
-		Values: "{\"ui\": { \"message\": \"what we do in the shadows\" } }",
+		TargetContext:       targetContext("test-4"),
+		Values:              "{\"ui\": { \"message\": \"what we do in the shadows\" } }",
 	}
 
 	expected_detail_with_values = &corev1.InstalledPackageDetail{
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
+		CurrentVersion: pkgAppVersion("6.0.0"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "*",
 		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-4 8080:9898\n",
-		ValuesApplied: "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-4"),
+		ValuesApplied:         "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
 	}
 
-	expected_resource_refs_with_values = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-4",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-4",
-		},
-	}
+	expected_resource_refs_with_values = podinfo_installed_refs("my-podinfo-4")
 
 	create_request_install_fails = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-5/podinfo", "default"),
 		Name:                "my-podinfo-5",
-		TargetContext: &corev1.Context{
-			Namespace: "test-5",
-			Cluster:   KubeappsCluster,
-		},
-		Values: "{\"replicaCount\": \"what we do in the shadows\" }",
+		TargetContext:       targetContext("test-5"),
+		Values:              "{\"replicaCount\": \"what we do in the shadows\" }",
 	}
 
 	expected_detail_install_fails = &corev1.InstalledPackageDetail{
@@ -219,10 +137,7 @@ var (
 	create_request_podinfo_5_2_1 = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-6/podinfo", "default"),
 		Name:                "my-podinfo-6",
-		TargetContext: &corev1.Context{
-			Namespace: "test-6",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-1"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
@@ -232,50 +147,26 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-6 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-6"),
 	}
 
-	expected_resource_refs_podinfo_5_2_1 = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-6",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-6",
-		},
-	}
+	expected_resource_refs_podinfo_5_2_1 = podinfo_installed_refs("my-podinfo-6")
 
 	expected_detail_podinfo_6_0_0 = &corev1.InstalledPackageDetail{
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "6.0.0",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-6 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("6.0.0"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-6"),
 	}
 
 	create_request_podinfo_5_2_1_no_values = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-7/podinfo", "default"),
 		Name:                "my-podinfo-7",
-		TargetContext: &corev1.Context{
-			Namespace: "test-7",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-7"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
@@ -285,51 +176,27 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-7 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-7"),
 	}
 
-	expected_resource_refs_podinfo_5_2_1_no_values = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-7",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-7",
-		},
-	}
+	expected_resource_refs_podinfo_5_2_1_no_values = podinfo_installed_refs("my-podinfo-7")
 
 	expected_detail_podinfo_5_2_1_values = &corev1.InstalledPackageDetail{
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		ValuesApplied: "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
-		Status:        statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-7 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		ValuesApplied:         "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-7"),
 	}
 
 	create_request_podinfo_5_2_1_values_2 = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-8/podinfo", "default"),
 		Name:                "my-podinfo-8",
-		TargetContext: &corev1.Context{
-			Namespace: "test-8",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-8"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
@@ -340,52 +207,28 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		ValuesApplied: "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
-		Status:        statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-8 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		ValuesApplied:         "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-8"),
 	}
 
-	expected_resource_refs_podinfo_5_2_1_values_2 = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-8",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-8",
-		},
-	}
+	expected_resource_refs_podinfo_5_2_1_values_2 = podinfo_installed_refs("my-podinfo-8")
 
 	expected_detail_podinfo_5_2_1_values_3 = &corev1.InstalledPackageDetail{
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		ValuesApplied: "{\"ui\":{\"message\":\"Le Bureau des Légendes\"}}",
-		Status:        statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-8 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		ValuesApplied:         "{\"ui\":{\"message\":\"Le Bureau des Légendes\"}}",
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-8"),
 	}
 
 	create_request_podinfo_5_2_1_values_4 = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-9/podinfo", "default"),
 		Name:                "my-podinfo-9",
-		TargetContext: &corev1.Context{
-			Namespace: "test-9",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-9"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
@@ -396,51 +239,27 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		ValuesApplied: "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
-		Status:        statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-9 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		ValuesApplied:         "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-9"),
 	}
 
-	expected_resource_refs_podinfo_5_2_1_values_4 = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-9",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-9",
-		},
-	}
+	expected_resource_refs_podinfo_5_2_1_values_4 = podinfo_installed_refs("my-podinfo-9")
 
 	expected_detail_podinfo_5_2_1_values_5 = &corev1.InstalledPackageDetail{
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-9 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-9"),
 	}
 
 	create_request_podinfo_5_2_1_values_6 = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-10/podinfo", "default"),
 		Name:                "my-podinfo-10",
-		TargetContext: &corev1.Context{
-			Namespace: "test-10",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-10"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
@@ -451,65 +270,71 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		ValuesApplied: "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
-		Status:        statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-10 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		ValuesApplied:         "{\"ui\":{\"message\":\"what we do in the shadows\"}}",
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-10"),
 	}
 
-	expected_resource_refs_podinfo_5_2_1_values_6 = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-10",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-10",
-		},
-	}
+	expected_resource_refs_podinfo_5_2_1_values_6 = podinfo_installed_refs("my-podinfo-10")
 
 	create_request_podinfo_7 = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-11/podinfo", "default"),
 		Name:                "my-podinfo-11",
-		TargetContext: &corev1.Context{
-			Namespace: "test-11",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-11"),
+	}
+
+	create_request_podinfo_8 = &corev1.CreateInstalledPackageRequest{
+		AvailablePackageRef: availableRef("podinfo-12/podinfo", "default"),
+		Name:                "my-podinfo-12",
+		TargetContext:       targetContext("test-12"),
+		Values:              "{\"replicaCount\": \"what we do in the shadows\" }",
 	}
 
 	expected_detail_podinfo_7 = &corev1.InstalledPackageDetail{
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "*",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-11 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("6.0.0"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-11"),
 	}
 
-	expected_resource_refs_podinfo_7 = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-11",
+	expected_detail_podinfo_8 = &corev1.InstalledPackageDetail{
+		CurrentVersion: &corev1.PackageAppVersion{
+			PkgVersion: "6.0.0",
 		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-11",
+		PkgVersionReference: &corev1.VersionReference{
+			Version: "*",
 		},
+		Status: &corev1.InstalledPackageStatus{
+			Ready:  false,
+			Reason: corev1.InstalledPackageStatus_STATUS_REASON_FAILED,
+			// most of the time it fails with
+			//   "InstallFailed: install retries exhausted",
+			// but every once in a while you get
+			//   "InstallFailed: Helm install failed: unable to build kubernetes objects from release manifest: error
+			//    validating "": error validating data: ValidationError(Deployment.spec.replicas): invalid type for
+			//    io.k8s.api.apps.v1.DeploymentSpec.replicas: got "string""
+			// so we'll just test the prefix
+			UserReason: "InstallFailed: ",
+		},
+		ValuesApplied: "{\"replicaCount\":\"what we do in the shadows\"}",
 	}
+
+	expected_detail_podinfo_9 = &corev1.InstalledPackageDetail{
+		PkgVersionReference: &corev1.VersionReference{
+			Version: "6.0.0",
+		},
+		CurrentVersion:        pkgAppVersion("6.0.0"),
+		ValuesApplied:         "{\n  \"replicaCount\": 1\n}\n",
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-12"),
+	}
+
+	expected_resource_refs_podinfo_7 = podinfo_installed_refs("my-podinfo-11")
+
+	expected_resource_refs_podinfo_9 = podinfo_installed_refs("my-podinfo-12")
 
 	update_request_1 = &corev1.UpdateInstalledPackageRequest{
 		// InstalledPackageRef will be filled in by the code below after a call to create(...) completes
@@ -558,13 +383,18 @@ var (
 		Values: "{\"ui\": { \"message\": \"what we do in the shadows\" } }",
 	}
 
+	update_request_7 = &corev1.UpdateInstalledPackageRequest{
+		// InstalledPackageRef will be filled in by the code below after a call to create(...) completes
+		PkgVersionReference: &corev1.VersionReference{
+			Version: "6.0.0",
+		},
+		Values: "{\"replicaCount\": 1 }",
+	}
+
 	create_request_podinfo_for_delete_1 = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-12/podinfo", "default"),
 		Name:                "my-podinfo-12",
-		TargetContext: &corev1.Context{
-			Namespace: "test-12",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-12"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
@@ -574,36 +404,17 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-12 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-12"),
 	}
 
-	expected_resource_refs_for_delete_1 = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-12",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-12",
-		},
-	}
+	expected_resource_refs_for_delete_1 = podinfo_installed_refs("my-podinfo-12")
 
 	create_request_podinfo_for_delete_2 = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-13/podinfo", "default"),
 		Name:                "my-podinfo-13",
-		TargetContext: &corev1.Context{
-			Namespace: "test-13",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-13"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
@@ -613,28 +424,12 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "=5.2.1",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "5.2.1",
-			AppVersion: "5.2.1",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-13 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("5.2.1"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo-13"),
 	}
 
-	expected_resource_refs_for_delete_2 = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-13",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-13",
-		},
-	}
+	expected_resource_refs_for_delete_2 = podinfo_installed_refs("my-podinfo-13")
 
 	create_request_wrong_cluster = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-14/podinfo", "default"),
@@ -648,19 +443,13 @@ var (
 	create_request_target_ns_doesnt_exist = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-15/podinfo", "default"),
 		Name:                "my-podinfo",
-		TargetContext: &corev1.Context{
-			Namespace: "test-15",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-15"),
 	}
 
 	create_request_auto_update = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo-16/podinfo", "default"),
 		Name:                "my-podinfo-16",
-		TargetContext: &corev1.Context{
-			Namespace: "test-16",
-			Cluster:   KubeappsCluster,
-		},
+		TargetContext:       targetContext("test-16"),
 		PkgVersionReference: &corev1.VersionReference{
 			Version: ">= 6",
 		},
@@ -673,29 +462,21 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: ">= 6",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
-		Status: statusInstalled,
+		CurrentVersion: pkgAppVersion("6.0.0"),
+		Status:         status_installed,
 		ReconciliationOptions: &corev1.ReconciliationOptions{
 			Interval: 30,
 		},
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-16 8080:9898\n",
+		PostInstallationNotes: podinfo_notes("my-podinfo-16"),
 	}
 
 	expected_detail_auto_update_2 = &corev1.InstalledPackageDetail{
 		PkgVersionReference: &corev1.VersionReference{
 			Version: ">= 6",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.3",
-			AppVersion: "6.0.3",
-		},
-		Name:   "my-podinfo-16",
-		Status: statusInstalled,
+		CurrentVersion: pkgAppVersion("6.0.3"),
+		Name:           "my-podinfo-16",
+		Status:         status_installed,
 		ReconciliationOptions: &corev1.ReconciliationOptions{
 			Interval: 30,
 		},
@@ -707,36 +488,18 @@ var (
 			Identifier: "podinfo-16/podinfo",
 			Plugin:     fluxPlugin,
 		},
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo-16 8080:9898\n",
+		PostInstallationNotes: podinfo_notes("my-podinfo-16"),
 	}
 
-	expected_resource_refs_auto_update = []*corev1.ResourceRef{
-		{
-			ApiVersion: "v1",
-			Kind:       "Service",
-			Name:       "my-podinfo-16",
-		},
-		{
-			ApiVersion: "apps/v1",
-			Kind:       "Deployment",
-			Name:       "my-podinfo-16",
-		},
-	}
+	expected_resource_refs_auto_update = podinfo_installed_refs("my-podinfo-16")
 
 	expected_detail_test_release_rbac = &corev1.InstalledPackageDetail{
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "*",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("6.0.0"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo"),
 	}
 
 	expected_summaries_test_release_rbac_1 = &corev1.GetInstalledPackageSummariesResponse{
@@ -771,16 +534,10 @@ var (
 					UserReason: "ReconciliationSucceeded: Release reconciliation succeeded",
 				},
 				// notice that the details from the corresponding chart, like LatestVersion, are present
-				CurrentVersion: &corev1.PackageAppVersion{
-					PkgVersion: "6.0.0",
-					AppVersion: "6.0.0",
-				},
+				CurrentVersion:   pkgAppVersion("6.0.0"),
 				PkgDisplayName:   "podinfo",
 				ShortDescription: "Podinfo Helm chart for Kubernetes",
-				LatestVersion: &corev1.PackageAppVersion{
-					PkgVersion: "6.0.0",
-					AppVersion: "6.0.0",
-				},
+				LatestVersion:    pkgAppVersion("6.0.0"),
 			},
 		},
 	}
@@ -790,18 +547,13 @@ var (
 			InstalledPackageRef: installedRef("my-podinfo", "@TARGET_NS@"),
 			PkgVersionReference: &corev1.VersionReference{Version: "*"},
 			Name:                "my-podinfo",
-			CurrentVersion: &corev1.PackageAppVersion{
-				PkgVersion: "6.0.0",
-				AppVersion: "6.0.0",
-			},
+			CurrentVersion:      pkgAppVersion("6.0.0"),
 			ReconciliationOptions: &corev1.ReconciliationOptions{
 				Interval: 60,
 			},
-			Status: statusInstalled,
-			PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-				"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-				"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo 8080:9898\n",
-			AvailablePackageRef: availableRef("podinfo-1/podinfo", "@SOURCE_NS@"),
+			Status:                status_installed,
+			PostInstallationNotes: podinfo_notes("my-podinfo"),
+			AvailablePackageRef:   availableRef("podinfo-1/podinfo", "@SOURCE_NS@"),
 		},
 	}
 
@@ -809,59 +561,53 @@ var (
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "*",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("6.0.0"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo"),
 	}
 
 	expected_detail_test_release_rbac_4 = &corev1.InstalledPackageDetail{
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "*",
 		},
-		CurrentVersion: &corev1.PackageAppVersion{
-			PkgVersion: "6.0.0",
-			AppVersion: "6.0.0",
-		},
-		Status: statusInstalled,
-		PostInstallationNotes: "1. Get the application URL by running these commands:\n  " +
-			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
-			"kubectl -n @TARGET_NS@ port-forward deploy/my-podinfo 8080:9898\n",
+		CurrentVersion:        pkgAppVersion("6.0.0"),
+		Status:                status_installed,
+		PostInstallationNotes: podinfo_notes("my-podinfo"),
 	}
 
-	available_package_summaries_podinfo_basic_auth = &corev1.GetAvailablePackageSummariesResponse{
-		AvailablePackageSummaries: []*corev1.AvailablePackageSummary{
-			{
+	available_package_summaries_podinfo_basic_auth = func(name string) *corev1.GetAvailablePackageSummariesResponse {
+		return &corev1.GetAvailablePackageSummariesResponse{
+			AvailablePackageSummaries: []*corev1.AvailablePackageSummary{
+				{
+					Name:                "podinfo",
+					AvailablePackageRef: availableRef(name+"/podinfo", "default"),
+					LatestVersion:       pkgAppVersion("6.0.0"),
+					DisplayName:         "podinfo",
+					ShortDescription:    "Podinfo Helm chart for Kubernetes",
+					Categories:          []string{""},
+				},
+			},
+		}
+	}
+
+	expected_detail_podinfo_basic_auth = func(name string) *corev1.GetAvailablePackageDetailResponse {
+		return &corev1.GetAvailablePackageDetailResponse{
+			AvailablePackageDetail: &corev1.AvailablePackageDetail{
+				AvailablePackageRef: availableRef(name+"/podinfo", "default"),
 				Name:                "podinfo",
-				AvailablePackageRef: availableRef("podinfo-basic-auth/podinfo", "default"),
-				LatestVersion:       &corev1.PackageAppVersion{PkgVersion: "6.0.0", AppVersion: "6.0.0"},
+				Version:             pkgAppVersion("6.0.0"),
+				RepoUrl:             "http://fluxv2plugin-testdata-svc.default.svc.cluster.local:80/podinfo-basic-auth",
+				HomeUrl:             "https://github.com/stefanprodan/podinfo",
 				DisplayName:         "podinfo",
 				ShortDescription:    "Podinfo Helm chart for Kubernetes",
-				Categories:          []string{""},
+				SourceUrls:          []string{"https://github.com/stefanprodan/podinfo"},
+				Maintainers: []*corev1.Maintainer{
+					{Name: "stefanprodan", Email: "stefanprodan@users.noreply.github.com"},
+				},
+				Readme:        "Podinfo is used by CNCF projects like [Flux](https://github.com/fluxcd/flux2)",
+				DefaultValues: "Default values for podinfo.\n\nreplicaCount: 1\n",
 			},
-		},
-	}
-
-	expected_detail_podinfo_basic_auth = &corev1.GetAvailablePackageDetailResponse{
-		AvailablePackageDetail: &corev1.AvailablePackageDetail{
-			AvailablePackageRef: availableRef("podinfo-basic-auth/podinfo", "default"),
-			Name:                "podinfo",
-			Version:             &corev1.PackageAppVersion{PkgVersion: "6.0.0", AppVersion: "6.0.0"},
-			RepoUrl:             "http://fluxv2plugin-testdata-svc.default.svc.cluster.local:80/podinfo-basic-auth",
-			HomeUrl:             "https://github.com/stefanprodan/podinfo",
-			DisplayName:         "podinfo",
-			ShortDescription:    "Podinfo Helm chart for Kubernetes",
-			SourceUrls:          []string{"https://github.com/stefanprodan/podinfo"},
-			Maintainers: []*corev1.Maintainer{
-				{Name: "stefanprodan", Email: "stefanprodan@users.noreply.github.com"},
-			},
-			Readme:        "Podinfo is used by CNCF projects like [Flux](https://github.com/fluxcd/flux2)",
-			DefaultValues: "Default values for podinfo.\n\nreplicaCount: 1\n",
-		},
+		}
 	}
 
 	valid_index_charts_spec = []testSpecChartWithFile{
@@ -884,12 +630,9 @@ var (
 
 	valid_index_package_summaries = []*corev1.AvailablePackageSummary{
 		{
-			Name:        "acs-engine-autoscaler",
-			DisplayName: "acs-engine-autoscaler",
-			LatestVersion: &corev1.PackageAppVersion{
-				PkgVersion: "2.1.1",
-				AppVersion: "2.1.1",
-			},
+			Name:             "acs-engine-autoscaler",
+			DisplayName:      "acs-engine-autoscaler",
+			LatestVersion:    pkgAppVersion("2.1.1"),
 			IconUrl:          "https://github.com/kubernetes/kubernetes/blob/master/logo/logo.png",
 			ShortDescription: "Scales worker nodes within agent pools",
 			AvailablePackageRef: &corev1.AvailablePackageReference{
@@ -918,12 +661,9 @@ var (
 	}
 
 	cert_manager_summary = &corev1.AvailablePackageSummary{
-		Name:        "cert-manager",
-		DisplayName: "cert-manager",
-		LatestVersion: &corev1.PackageAppVersion{
-			PkgVersion: "v1.4.0",
-			AppVersion: "v1.4.0",
-		},
+		Name:             "cert-manager",
+		DisplayName:      "cert-manager",
+		LatestVersion:    pkgAppVersion("v1.4.0"),
 		IconUrl:          "https://raw.githubusercontent.com/jetstack/cert-manager/master/logo/logo.png",
 		ShortDescription: "A Helm chart for cert-manager",
 		AvailablePackageRef: &corev1.AvailablePackageReference{
@@ -1106,18 +846,269 @@ var (
 		},
 	}
 
-	add_repo_expected_resp = &corev1.AddPackageRepositoryResponse{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				Namespace: "foo",
-				Cluster:   KubeappsCluster,
-			},
-			Identifier: "bar",
-			Plugin:     fluxPlugin,
+	add_repo_5 = sourcev1.HelmRepository{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       sourcev1.HelmRepositoryKind,
+			APIVersion: sourcev1.GroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "bar",
+			Namespace:       "foo",
+			ResourceVersion: "1",
+		},
+		Spec: sourcev1.HelmRepositorySpec{
+			URL:             "http://example.com",
+			Interval:        metav1.Duration{Duration: 10 * time.Minute},
+			PassCredentials: true,
 		},
 	}
 
-	statusInstalled = &corev1.InstalledPackageStatus{
+	add_repo_req_1 = &corev1.AddPackageRepositoryRequest{
+		Name:            "bar",
+		Context:         &corev1.Context{Namespace: "foo"},
+		NamespaceScoped: true,
+	}
+
+	add_repo_req_2 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "foobar",
+	}
+
+	add_repo_req_3 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+	}
+
+	add_repo_req_4 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		TlsConfig: &corev1.PackageRepositoryTlsConfig{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	add_repo_req_5 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+	}
+
+	add_repo_req_6 = func(ca []byte) *corev1.AddPackageRepositoryRequest {
+		return &corev1.AddPackageRepositoryRequest{
+			Name:    "bar",
+			Context: &corev1.Context{Namespace: "foo"},
+			Type:    "helm",
+			Url:     "http://example.com",
+			TlsConfig: &corev1.PackageRepositoryTlsConfig{
+				PackageRepoTlsConfigOneOf: &corev1.PackageRepositoryTlsConfig_CertAuthority{
+					CertAuthority: string(ca),
+				},
+			},
+		}
+	}
+
+	add_repo_req_7 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		TlsConfig: &corev1.PackageRepositoryTlsConfig{
+			PackageRepoTlsConfigOneOf: &corev1.PackageRepositoryTlsConfig_SecretRef{
+				SecretRef: &corev1.SecretKeyReference{
+					Name: "secret-1",
+				},
+			},
+		},
+	}
+
+	add_repo_req_8 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		Auth: &corev1.PackageRepositoryAuth{
+			Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH,
+			PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_UsernamePassword{
+				UsernamePassword: &corev1.UsernamePassword{
+					Username: "baz",
+					Password: "zot",
+				},
+			},
+			PassCredentials: true,
+		},
+	}
+
+	add_repo_req_9 = func(pub, priv []byte) *corev1.AddPackageRepositoryRequest {
+		return &corev1.AddPackageRepositoryRequest{
+			Name:    "bar",
+			Context: &corev1.Context{Namespace: "foo"},
+			Type:    "helm",
+			Url:     "http://example.com",
+			Auth:    tls_auth(pub, priv),
+		}
+	}
+
+	add_repo_req_10 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		Auth: &corev1.PackageRepositoryAuth{
+			Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BEARER,
+			PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_Header{
+				Header: "foobarzot",
+			},
+		},
+	}
+
+	add_repo_req_11 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		Auth: &corev1.PackageRepositoryAuth{
+			Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_CUSTOM,
+			PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_Header{
+				Header: "foobarzot",
+			},
+		},
+	}
+
+	add_repo_req_12 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		Auth: &corev1.PackageRepositoryAuth{
+			Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_DOCKER_CONFIG_JSON,
+			PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_DockerCreds{
+				DockerCreds: &corev1.DockerCredentials{
+					Server:   "your.private.registry.example.com",
+					Username: "janedoe",
+					Password: "xxxxxxxx",
+					Email:    "jdoe@example.com",
+				},
+			},
+		},
+	}
+
+	add_repo_req_13 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		Auth:    secret_1_auth,
+	}
+
+	add_repo_req_14 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		Auth:    secret_1_auth,
+		TlsConfig: &corev1.PackageRepositoryTlsConfig{
+			PackageRepoTlsConfigOneOf: &corev1.PackageRepositoryTlsConfig_SecretRef{
+				SecretRef: &corev1.SecretKeyReference{
+					Name: "secret-2",
+				},
+			},
+		},
+	}
+
+	add_repo_req_15 = &corev1.AddPackageRepositoryRequest{
+		Name:    "my-podinfo",
+		Context: &corev1.Context{Namespace: "default"},
+		Type:    "helm",
+		Url:     podinfo_repo_url,
+	}
+
+	add_repo_req_16 = &corev1.AddPackageRepositoryRequest{
+		Name:    "my-podinfo-2",
+		Context: &corev1.Context{Namespace: "default"},
+		Type:    "helm",
+		Url:     podinfo_basic_auth_repo_url,
+		Auth:    foo_bar_auth,
+	}
+
+	add_repo_req_17 = &corev1.AddPackageRepositoryRequest{
+		Name:    "my-podinfo-3",
+		Context: &corev1.Context{Namespace: "default"},
+		Type:    "helm",
+		Url:     podinfo_basic_auth_repo_url,
+		Auth: &corev1.PackageRepositoryAuth{
+			Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH,
+			PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_UsernamePassword{
+				UsernamePassword: &corev1.UsernamePassword{
+					Username: "foo",
+					Password: "bar-2",
+				},
+			},
+		},
+	}
+
+	add_repo_req_18 = &corev1.AddPackageRepositoryRequest{
+		Name:    "my-podinfo-4",
+		Context: &corev1.Context{Namespace: "default"},
+		Type:    "helm",
+		Url:     podinfo_basic_auth_repo_url,
+		Auth:    secret_1_auth,
+	}
+
+	add_repo_req_19 = &corev1.AddPackageRepositoryRequest{
+		Name:    "my-podinfo-4",
+		Context: &corev1.Context{Namespace: "default"},
+		Type:    "helm",
+		Url:     podinfo_tls_repo_url,
+		Auth: &corev1.PackageRepositoryAuth{
+			Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_TLS,
+			PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_SecretRef{
+				SecretRef: &corev1.SecretKeyReference{
+					Name: "secret-2",
+				},
+			},
+		},
+	}
+
+	add_repo_req_20 = &corev1.AddPackageRepositoryRequest{
+		Name:    "bar",
+		Context: &corev1.Context{Namespace: "foo"},
+		Type:    "helm",
+		Url:     "http://example.com",
+		Auth: &corev1.PackageRepositoryAuth{
+			PassCredentials: true,
+		},
+	}
+
+	add_repo_expected_resp = &corev1.AddPackageRepositoryResponse{
+		PackageRepoRef: repoRef("bar", "foo"),
+	}
+
+	add_repo_expected_resp_2 = &corev1.AddPackageRepositoryResponse{
+		PackageRepoRef: repoRef("my-podinfo", "default"),
+	}
+
+	add_repo_expected_resp_3 = &corev1.AddPackageRepositoryResponse{
+		PackageRepoRef: repoRef("my-podinfo-2", "default"),
+	}
+
+	add_repo_expected_resp_4 = &corev1.AddPackageRepositoryResponse{
+		PackageRepoRef: repoRef("my-podinfo-3", "default"),
+	}
+
+	add_repo_expected_resp_5 = &corev1.AddPackageRepositoryResponse{
+		PackageRepoRef: repoRef("my-podinfo-4", "default"),
+	}
+
+	add_repo_expected_resp_6 = &corev1.AddPackageRepositoryResponse{
+		PackageRepoRef: repoRef("my-podinfo-4", "default"),
+	}
+
+	status_installed = &corev1.InstalledPackageStatus{
 		Ready:      true,
 		Reason:     corev1.InstalledPackageStatus_STATUS_REASON_INSTALLED,
 		UserReason: "ReconciliationSucceeded: Release reconciliation succeeded",
@@ -1138,7 +1129,7 @@ var (
 		},
 		PkgDisplayName:   "redis",
 		ShortDescription: "Open source, advanced key-value store. It is often referred to as a data structure server since keys can contain strings, hashes, lists, sets and sorted sets.",
-		Status:           statusInstalled,
+		Status:           status_installed,
 		LatestVersion: &corev1.PackageAppVersion{
 			PkgVersion: "14.4.0",
 			AppVersion: "6.2.4",
@@ -1234,7 +1225,7 @@ var (
 		},
 		ShortDescription: "Apache Airflow is a platform to programmatically author, schedule and monitor workflows.",
 		PkgDisplayName:   "airflow",
-		Status:           statusInstalled,
+		Status:           status_installed,
 	}
 
 	redis_summary_latest = &corev1.InstalledPackageSummary{
@@ -1250,7 +1241,7 @@ var (
 		},
 		PkgDisplayName:   "redis",
 		ShortDescription: "Open source, advanced key-value store. It is often referred to as a data structure server since keys can contain strings, hashes, lists, sets and sorted sets.",
-		Status:           statusInstalled,
+		Status:           status_installed,
 		LatestVersion: &corev1.PackageAppVersion{
 			PkgVersion: "14.4.0",
 			AppVersion: "6.2.4",
@@ -1274,7 +1265,7 @@ var (
 		},
 		ShortDescription: "Apache Airflow is a platform to programmatically author, schedule and monitor workflows.",
 		PkgDisplayName:   "airflow",
-		Status:           statusInstalled,
+		Status:           status_installed,
 	}
 
 	lastTransitionTime, _ = time.Parse(time.RFC3339, "2021-08-11T08:46:03Z")
@@ -1621,7 +1612,7 @@ var (
 		ReconciliationOptions: &corev1.ReconciliationOptions{
 			Interval: 60,
 		},
-		Status:                statusInstalled,
+		Status:                status_installed,
 		AvailablePackageRef:   availableRef("bitnami-1/redis", "default"),
 		PostInstallationNotes: "some notes",
 	}
@@ -1641,62 +1632,30 @@ var (
 			Suspend:            true,
 			ServiceAccountName: "foo",
 		},
-		Status:                statusInstalled,
+		Status:                status_installed,
 		ValuesApplied:         "{\"replica\": { \"replicaCount\":  \"1\", \"configuration\": \"xyz\"    }}",
 		AvailablePackageRef:   availableRef("bitnami-1/redis", "default"),
 		PostInstallationNotes: "some notes",
 	}
 
-	flux_helm_release_basic = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
+	flux_helm_release_basic = newFluxHelmRelease(helmv2.HelmChartTemplateSpec{
+		Chart: "podinfo",
+		SourceRef: helmv2.CrossNamespaceObjectReference{
+			Kind:      sourcev1.HelmRepositoryKind,
+			Name:      "podinfo",
+			Namespace: "namespace-1",
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "podinfo",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
+	})
 
-	flux_helm_release_semver_constraint = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
+	flux_helm_release_semver_constraint = newFluxHelmRelease(helmv2.HelmChartTemplateSpec{
+		Chart: "podinfo",
+		SourceRef: helmv2.CrossNamespaceObjectReference{
+			Kind:      sourcev1.HelmRepositoryKind,
+			Name:      "podinfo",
+			Namespace: "namespace-1",
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart: "podinfo",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-					Version: "> 5",
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
+		Version: "> 5",
+	})
 
 	flux_helm_release_reconcile_options = &helmv2.HelmRelease{
 		TypeMeta: metav1.TypeMeta{
@@ -1986,17 +1945,13 @@ var (
 	create_package_simple_req = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
 		Name:                "my-podinfo",
-		TargetContext: &corev1.Context{
-			Namespace: "test",
-		},
+		TargetContext:       &corev1.Context{Namespace: "test"},
 	}
 
 	create_package_semver_constraint_req = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
 		Name:                "my-podinfo",
-		TargetContext: &corev1.Context{
-			Namespace: "test",
-		},
+		TargetContext:       &corev1.Context{Namespace: "test"},
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "> 5",
 		},
@@ -2005,9 +1960,7 @@ var (
 	create_package_reconcile_options_req = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
 		Name:                "my-podinfo",
-		TargetContext: &corev1.Context{
-			Namespace: "test",
-		},
+		TargetContext:       &corev1.Context{Namespace: "test"},
 		ReconciliationOptions: &corev1.ReconciliationOptions{
 			Interval:           60,
 			Suspend:            false,
@@ -2018,135 +1971,65 @@ var (
 	create_package_values_json_override = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
 		Name:                "my-podinfo",
-		TargetContext: &corev1.Context{
-			Namespace: "test",
-		},
-		Values: "{\"ui\": { \"message\": \"what we do in the shadows\" } }",
+		TargetContext:       &corev1.Context{Namespace: "test"},
+		Values:              "{\"ui\": { \"message\": \"what we do in the shadows\" } }",
 	}
 
 	create_package_values_yaml_override = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
 		Name:                "my-podinfo",
-		TargetContext: &corev1.Context{
-			Namespace: "test",
-		},
-		Values: "# Default values for podinfo.\n---\nui:\n  message: what we do in the shadows",
+		TargetContext:       &corev1.Context{Namespace: "test"},
+		Values:              "# Default values for podinfo.\n---\nui:\n  message: what we do in the shadows",
 	}
 
 	create_package_for_test_of_upgrade_policy = &corev1.CreateInstalledPackageRequest{
 		AvailablePackageRef: availableRef("podinfo/podinfo", "namespace-1"),
 		Name:                "my-podinfo",
-		TargetContext: &corev1.Context{
-			Namespace: "test",
-		},
+		TargetContext:       &corev1.Context{Namespace: "test"},
 		PkgVersionReference: &corev1.VersionReference{
 			Version: "5.2.1",
 		},
 	}
 
-	flux_helm_release_upgrade_policy_none = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
+	flux_helm_release_upgrade_policy_none = newFluxHelmRelease(helmv2.HelmChartTemplateSpec{
+		Chart:   "podinfo",
+		Version: "5.2.1",
+		SourceRef: helmv2.CrossNamespaceObjectReference{
+			Kind:      sourcev1.HelmRepositoryKind,
+			Name:      "podinfo",
+			Namespace: "namespace-1",
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart:   "podinfo",
-					Version: "5.2.1",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
+	})
 
-	flux_helm_release_upgrade_policy_major = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
+	flux_helm_release_upgrade_policy_major = newFluxHelmRelease(helmv2.HelmChartTemplateSpec{
+		Chart:   "podinfo",
+		Version: ">=5.2.1",
+		SourceRef: helmv2.CrossNamespaceObjectReference{
+			Kind:      sourcev1.HelmRepositoryKind,
+			Name:      "podinfo",
+			Namespace: "namespace-1",
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart:   "podinfo",
-					Version: ">=5.2.1",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
+	})
 
-	flux_helm_release_upgrade_policy_minor = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
+	flux_helm_release_upgrade_policy_minor = newFluxHelmRelease(helmv2.HelmChartTemplateSpec{
+		Chart:   "podinfo",
+		Version: ">=5.2.1 <6.0.0",
+		SourceRef: helmv2.CrossNamespaceObjectReference{
+			Kind:      sourcev1.HelmRepositoryKind,
+			Name:      "podinfo",
+			Namespace: "namespace-1",
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart:   "podinfo",
-					Version: ">=5.2.1 <6.0.0",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
+	})
 
-	flux_helm_release_upgrade_policy_patch = &helmv2.HelmRelease{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       helmv2.HelmReleaseKind,
-			APIVersion: helmv2.GroupVersion.String(),
+	flux_helm_release_upgrade_policy_patch = newFluxHelmRelease(helmv2.HelmChartTemplateSpec{
+		Chart:   "podinfo",
+		Version: ">=5.2.1 <5.3.0",
+		SourceRef: helmv2.CrossNamespaceObjectReference{
+			Kind:      sourcev1.HelmRepositoryKind,
+			Name:      "podinfo",
+			Namespace: "namespace-1",
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "my-podinfo",
-			Namespace:       "test",
-			ResourceVersion: "1",
-		},
-		Spec: helmv2.HelmReleaseSpec{
-			Chart: helmv2.HelmChartTemplate{
-				Spec: helmv2.HelmChartTemplateSpec{
-					Chart:   "podinfo",
-					Version: ">=5.2.1 <5.3.0",
-					SourceRef: helmv2.CrossNamespaceObjectReference{
-						Kind:      sourcev1.HelmRepositoryKind,
-						Name:      "podinfo",
-						Namespace: "namespace-1",
-					},
-				},
-			},
-			Interval: metav1.Duration{Duration: 1 * time.Minute},
-		},
-	}
+	})
 
 	flux_helm_release_updated_upgrade_major = &helmv2.HelmRelease{
 		TypeMeta: metav1.TypeMeta{
@@ -2230,22 +2113,10 @@ var (
 	}
 
 	get_repo_detail_req_1 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				Namespace: "namespace-1",
-			},
-			Identifier: "repo-1",
-		},
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
 	}
 
-	get_repo_detail_package_resp_ref = &corev1.PackageRepositoryReference{
-		Context: &corev1.Context{
-			Cluster:   KubeappsCluster,
-			Namespace: "namespace-1",
-		},
-		Identifier: "repo-1",
-		Plugin:     fluxPlugin,
-	}
+	get_repo_detail_package_resp_ref = repoRef("repo-1", "namespace-1")
 
 	get_repo_detail_resp_1 = &corev1.GetPackageRepositoryDetailResponse{
 		Detail: &corev1.PackageRepositoryDetail{
@@ -2256,33 +2127,17 @@ var (
 			Type:            "helm",
 			Url:             "https://example.repo.com/charts",
 			Interval:        60,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-			},
-			Status: &corev1.PackageRepositoryStatus{
-				Ready:      true,
-				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-				UserReason: "Succeeded: stored artifact for revision '651f952130ea96823711d08345b85e82be011dc6'",
-			},
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
+			Status:          podinfo_repo_status_2,
 		},
 	}
 
 	get_repo_detail_req_2 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				Namespace: "namespace-1",
-			},
-			Identifier: "repo-kaka",
-		},
+		PackageRepoRef: repoRefInReq("repo-kaka", "namespace-1"),
 	}
 
 	get_repo_detail_req_3 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				Namespace: "namespace-kaka",
-			},
-			Identifier: "repo-1",
-		},
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-kaka"),
 	}
 
 	get_repo_detail_req_4 = &corev1.GetPackageRepositoryDetailRequest{
@@ -2310,9 +2165,7 @@ var (
 			Type:            "helm",
 			Url:             "https://example.repo.com/charts",
 			Interval:        60,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-			},
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
 			TlsConfig: &corev1.PackageRepositoryTlsConfig{
 				InsecureSkipVerify: false,
 				PackageRepoTlsConfigOneOf: &corev1.PackageRepositoryTlsConfig_SecretRef{
@@ -2322,12 +2175,30 @@ var (
 					},
 				},
 			},
-			Status: &corev1.PackageRepositoryStatus{
-				Ready:      true,
-				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-				UserReason: "Succeeded: stored artifact for revision '651f952130ea96823711d08345b85e82be011dc6'",
-			},
+			Status: podinfo_repo_status_2,
 		},
+	}
+
+	get_repo_detail_resp_6a = func(ca []byte) *corev1.GetPackageRepositoryDetailResponse {
+		return &corev1.GetPackageRepositoryDetailResponse{
+			Detail: &corev1.PackageRepositoryDetail{
+				PackageRepoRef:  get_repo_detail_package_resp_ref,
+				Name:            "repo-1",
+				Description:     "",
+				NamespaceScoped: false,
+				Type:            "helm",
+				Url:             "https://example.repo.com/charts",
+				Interval:        60,
+				Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
+				TlsConfig: &corev1.PackageRepositoryTlsConfig{
+					InsecureSkipVerify: false,
+					PackageRepoTlsConfigOneOf: &corev1.PackageRepositoryTlsConfig_CertAuthority{
+						CertAuthority: string(ca),
+					},
+				},
+				Status: podinfo_repo_status_2,
+			},
+		}
 	}
 
 	get_repo_detail_resp_7 = &corev1.GetPackageRepositoryDetailResponse{
@@ -2339,9 +2210,7 @@ var (
 			Type:            "helm",
 			Url:             "https://example.repo.com/charts",
 			Interval:        60,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-			},
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
 			Status: &corev1.PackageRepositoryStatus{
 				Ready:      false,
 				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_PENDING,
@@ -2359,9 +2228,7 @@ var (
 			Type:            "helm",
 			Url:             "https://example.repo.com/charts",
 			Interval:        60,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-			},
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
 			Status: &corev1.PackageRepositoryStatus{
 				Ready:      false,
 				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_FAILED,
@@ -2388,22 +2255,28 @@ var (
 					},
 				},
 			},
-			Status: &corev1.PackageRepositoryStatus{
-				Ready:      true,
-				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-				UserReason: "Succeeded: stored artifact for revision '651f952130ea96823711d08345b85e82be011dc6'",
-			},
+			Status: podinfo_repo_status_2,
 		},
 	}
 
-	get_repo_detail_req_6 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				// will be set when test scenario is run
-				Namespace: "TBD",
+	get_repo_detail_resp_9a = func(pub, priv []byte) *corev1.GetPackageRepositoryDetailResponse {
+		return &corev1.GetPackageRepositoryDetailResponse{
+			Detail: &corev1.PackageRepositoryDetail{
+				PackageRepoRef:  get_repo_detail_package_resp_ref,
+				Name:            "repo-1",
+				Description:     "",
+				NamespaceScoped: false,
+				Type:            "helm",
+				Url:             "https://example.repo.com/charts",
+				Interval:        60,
+				Auth:            tls_auth(pub, priv),
+				Status:          podinfo_repo_status_2,
 			},
-			Identifier: "my-podinfo",
-		},
+		}
+	}
+
+	get_repo_detail_req_6 = &corev1.GetPackageRepositoryDetailRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo", "TBD"),
 	}
 
 	get_repo_detail_resp_10 = &corev1.GetPackageRepositoryDetailResponse{
@@ -2415,81 +2288,53 @@ var (
 			Type:            "helm",
 			Url:             "https://example.repo.com/charts",
 			Interval:        60,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-				Type:            corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH,
-				PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_SecretRef{
-					SecretRef: &corev1.SecretKeyReference{
-						Name: "secret-1",
-					},
-				},
-			},
-			Status: &corev1.PackageRepositoryStatus{
-				Ready:      true,
-				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-				UserReason: "Succeeded: stored artifact for revision '651f952130ea96823711d08345b85e82be011dc6'",
-			},
+			Auth:            secret_1_auth,
+			Status:          podinfo_repo_status_2,
+		},
+	}
+
+	get_repo_detail_resp_10a = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        60,
+			Auth:            foo_bar_auth,
+			Status:          podinfo_repo_status_2,
 		},
 	}
 
 	get_repo_detail_resp_11 = &corev1.GetPackageRepositoryDetailResponse{
 		Detail: &corev1.PackageRepositoryDetail{
-			PackageRepoRef: &corev1.PackageRepositoryReference{
-				Context: &corev1.Context{
-					Cluster: KubeappsCluster,
-					// will be set when scenario is run
-					Namespace: "TBD",
-				},
-				Identifier: "my-podinfo",
-				Plugin:     fluxPlugin,
-			},
+			PackageRepoRef:  repoRefWithId("my-podinfo"),
 			Name:            "my-podinfo",
 			Description:     "",
 			NamespaceScoped: false,
 			Type:            "helm",
 			Url:             podinfo_repo_url,
 			Interval:        600,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-			},
-			Status: &corev1.PackageRepositoryStatus{
-				Ready:      true,
-				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-				UserReason: "Succeeded: stored artifact for revision '2867920fb8f56575f4bc95ed878ee2a0c8ae79cdd2bca210a72aa3ff04defa1b'",
-			},
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
+			Status:          podinfo_repo_status_3,
 		},
 	}
 
 	get_repo_detail_req_7 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				// will be set when test scenario is run
-				Namespace: "TBD",
-			},
-			Identifier: "my-bitnami",
-		},
+		PackageRepoRef: repoRefInReq("my-bitnami", "TBD"),
 	}
 
 	get_repo_detail_resp_12 = &corev1.GetPackageRepositoryDetailResponse{
 		Detail: &corev1.PackageRepositoryDetail{
-			PackageRepoRef: &corev1.PackageRepositoryReference{
-				Context: &corev1.Context{
-					Cluster: KubeappsCluster,
-					// will be set when scenario is run
-					Namespace: "TBD",
-				},
-				Identifier: "my-bitnami",
-				Plugin:     fluxPlugin,
-			},
+			PackageRepoRef:  repoRefWithId("my-bitnami"),
 			Name:            "my-bitnami",
 			Description:     "",
 			NamespaceScoped: false,
 			Type:            "helm",
 			Url:             "https://charts.bitnami.com/bitnami",
 			Interval:        600,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-			},
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
 			Status: &corev1.PackageRepositoryStatus{
 				Ready:      true,
 				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
@@ -2500,24 +2345,14 @@ var (
 
 	get_repo_detail_resp_13 = &corev1.GetPackageRepositoryDetailResponse{
 		Detail: &corev1.PackageRepositoryDetail{
-			PackageRepoRef: &corev1.PackageRepositoryReference{
-				Context: &corev1.Context{
-					Cluster: KubeappsCluster,
-					// will be set when scenario is run
-					Namespace: "TBD",
-				},
-				Identifier: "my-podinfo-2",
-				Plugin:     fluxPlugin,
-			},
+			PackageRepoRef:  repoRefWithId("my-podinfo-2"),
 			Name:            "my-podinfo-2",
 			Description:     "",
 			NamespaceScoped: false,
 			Type:            "helm",
 			Url:             podinfo_basic_auth_repo_url,
 			Interval:        600,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-			},
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
 			Status: &corev1.PackageRepositoryStatus{
 				Ready:      false,
 				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_FAILED,
@@ -2528,76 +2363,47 @@ var (
 
 	get_repo_detail_resp_14 = &corev1.GetPackageRepositoryDetailResponse{
 		Detail: &corev1.PackageRepositoryDetail{
-			PackageRepoRef: &corev1.PackageRepositoryReference{
-				Context: &corev1.Context{
-					Cluster: KubeappsCluster,
-					// will be set when scenario is run
-					Namespace: "TBD",
-				},
-				Identifier: "my-podinfo-3",
-				Plugin:     fluxPlugin,
-			},
+			PackageRepoRef:  repoRefWithId("my-podinfo-3"),
 			Name:            "my-podinfo-3",
 			Description:     "",
 			NamespaceScoped: false,
 			Type:            "helm",
 			Url:             podinfo_basic_auth_repo_url,
 			Interval:        600,
-			Auth: &corev1.PackageRepositoryAuth{
-				PassCredentials: false,
-				Type:            corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH,
-				PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_SecretRef{
-					SecretRef: &corev1.SecretKeyReference{
-						Name: "secret-1",
-					},
-				},
-			},
-			Status: &corev1.PackageRepositoryStatus{
-				Ready:      true,
-				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-				UserReason: "Succeeded: stored artifact for revision '9d3ac1eb708dfaebae14d7c88fd46afce8b1e0f7aace790d91758575dc8ce518'",
-			},
+			Auth:            secret_1_auth,
+			Status:          podinfo_repo_status_1,
+		},
+	}
+
+	get_repo_detail_resp_14a = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  repoRefWithId("my-podinfo-3"),
+			Name:            "my-podinfo-3",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             podinfo_basic_auth_repo_url,
+			Interval:        600,
+			Auth:            foo_bar_auth,
+			Status:          podinfo_repo_status_1,
 		},
 	}
 
 	get_repo_detail_req_8 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				// will be set when test scenario is run
-				Namespace: "TBD",
-			},
-			Identifier: "my-kaka",
-		},
+		PackageRepoRef: repoRefInReq("my-kaka", "TBD"),
 	}
 
 	get_repo_detail_req_9 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				// will be set when test scenario is run
-				Namespace: "TBD",
-			},
-			Identifier: "my-podinfo-2",
-		},
+		PackageRepoRef: repoRefInReq("my-podinfo-2", "TBD"),
 	}
 
 	get_repo_detail_req_10 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				// will be set when test scenario is run
-				Namespace: "TBD",
-			},
-			Identifier: "my-podinfo-3",
-		},
+		PackageRepoRef: repoRefInReq("my-podinfo-3", "TBD"),
 	}
 
 	get_repo_detail_req_11 = &corev1.GetPackageRepositoryDetailRequest{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				// will be set when test scenario is run
-				Namespace: "TBD",
-			},
-			Identifier: "my-podinfo-4",
-		},
+		// namespace will be set when test scenario is run
+		PackageRepoRef: repoRefInReq("my-podinfo-4", "TBD"),
 	}
 
 	get_summaries_repo_1 = newRepo("bar", "foo",
@@ -2655,9 +2461,7 @@ var (
 			URL:      "http://example.com",
 			Interval: metav1.Duration{Duration: 10 * time.Minute},
 		},
-		&sourcev1.HelmRepositoryStatus{
-			ObservedGeneration: -1,
-		},
+		&sourcev1.HelmRepositoryStatus{ObservedGeneration: -1},
 	)
 
 	get_summaries_repo_4 = newRepo("failed", "xyz",
@@ -2678,77 +2482,37 @@ var (
 		})
 
 	get_summaries_summary_1 = &corev1.PackageRepositorySummary{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				Cluster:   KubeappsCluster,
-				Namespace: "foo",
-			},
-			Identifier: "bar",
-			Plugin:     fluxPlugin,
-		},
+		PackageRepoRef:  repoRef("bar", "foo"),
 		Name:            "bar",
 		Description:     "",
 		NamespaceScoped: false,
 		Type:            "helm",
 		Url:             "http://example.com",
-		Status: &corev1.PackageRepositoryStatus{
-			Ready:      true,
-			Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-			UserReason: "Succeeded: stored artifact for revision '651f952130ea96823711d08345b85e82be011dc6'",
-		},
+		Status:          podinfo_repo_status_2,
 	}
 
 	get_summaries_summary_2 = &corev1.PackageRepositorySummary{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				Cluster:   KubeappsCluster,
-				Namespace: "xyz",
-			},
-			Identifier: "zot",
-			Plugin:     fluxPlugin,
-		},
+		PackageRepoRef:  repoRef("zot", "xyz"),
 		Name:            "zot",
 		Description:     "",
 		NamespaceScoped: false,
 		Type:            "helm",
 		Url:             "http://example.com",
-		Status: &corev1.PackageRepositoryStatus{
-			Ready:      true,
-			Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-			UserReason: "Succeeded: stored artifact for revision '651f952130ea96823711d08345b85e82be011dc6'",
-		},
+		Status:          podinfo_repo_status_2,
 	}
 
 	get_summaries_summary_3 = &corev1.PackageRepositorySummary{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				Cluster:   KubeappsCluster,
-				Namespace: "xyz",
-			},
-			Identifier: "pending",
-			Plugin:     fluxPlugin,
-		},
+		PackageRepoRef:  repoRef("pending", "xyz"),
 		Name:            "pending",
 		Description:     "",
 		NamespaceScoped: false,
 		Type:            "helm",
 		Url:             "http://example.com",
-		Status: &corev1.PackageRepositoryStatus{
-			Ready:      false,
-			Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_PENDING,
-			UserReason: "",
-		},
+		Status:          repo_status_pending,
 	}
 
 	get_summaries_summary_4 = &corev1.PackageRepositorySummary{
-		PackageRepoRef: &corev1.PackageRepositoryReference{
-			Context: &corev1.Context{
-				Cluster:   KubeappsCluster,
-				Namespace: "xyz",
-			},
-			Identifier: "failed",
-			Plugin:     fluxPlugin,
-		},
+		PackageRepoRef:  repoRef("failed", "xyz"),
 		Name:            "failed",
 		Description:     "",
 		NamespaceScoped: false,
@@ -2763,24 +2527,474 @@ var (
 
 	get_summaries_summary_5 = func(name, ns string) *corev1.PackageRepositorySummary {
 		return &corev1.PackageRepositorySummary{
-			PackageRepoRef: &corev1.PackageRepositoryReference{
-				Context: &corev1.Context{
-					Cluster:   KubeappsCluster,
-					Namespace: ns,
-				},
-				Identifier: name,
-				Plugin:     fluxPlugin,
-			},
+			PackageRepoRef:  repoRef(name, ns),
 			Name:            name,
 			Description:     "",
 			NamespaceScoped: false,
 			Type:            "helm",
 			Url:             podinfo_repo_url,
-			Status: &corev1.PackageRepositoryStatus{
-				Ready:      true,
-				Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
-				UserReason: "Succeeded: stored artifact for revision '2867920fb8f56575f4bc95ed878ee2a0c8ae79cdd2bca210a72aa3ff04defa1b'",
+			Status:          podinfo_repo_status_3,
+		}
+	}
+
+	update_repo_req_1 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "http://newurl.com",
+	}
+
+	update_repo_req_2 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "https://example.repo.com/charts",
+		Interval:       345,
+	}
+
+	update_repo_req_3 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "https://example.repo.com/charts",
+		Auth:           &corev1.PackageRepositoryAuth{PassCredentials: true},
+	}
+
+	update_repo_req_4 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "https://example.repo.com/charts",
+		TlsConfig: &corev1.PackageRepositoryTlsConfig{
+			PackageRepoTlsConfigOneOf: &corev1.PackageRepositoryTlsConfig_SecretRef{
+				SecretRef: &corev1.SecretKeyReference{
+					Name: "secret-1",
+					Key:  "caFile",
+				},
+			},
+		},
+	}
+
+	update_repo_req_5 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "https://example.repo.com/charts",
+	}
+
+	update_repo_req_6 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "https://example.repo.com/charts",
+		Auth:           secret_1_auth,
+	}
+
+	update_repo_req_7 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "https://example.repo.com/charts",
+	}
+
+	update_repo_req_8 = func(pub, priv []byte) *corev1.UpdatePackageRepositoryRequest {
+		return &corev1.UpdatePackageRepositoryRequest{
+			PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+			Url:            "https://example.repo.com/charts",
+			Auth:           tls_auth(pub, priv),
+		}
+	}
+
+	update_repo_req_9 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "https://example.repo.com/charts",
+	}
+
+	update_repo_req_10 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+		Url:            "https://example.repo.com/charts",
+		Auth:           foo_bar_auth,
+	}
+
+	update_repo_req_11 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo", "TBD"),
+		Url:            podinfo_basic_auth_repo_url,
+		Auth:           foo_bar_auth,
+	}
+
+	update_repo_req_12 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo-2", "TBD"),
+		Url:            podinfo_basic_auth_repo_url,
+		Auth:           foo_bar_auth,
+	}
+
+	update_repo_req_13 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo-3", "TBD"),
+		Url:            podinfo_repo_url,
+	}
+
+	update_repo_req_14 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo-4", "TBD"),
+		Url:            podinfo_basic_auth_repo_url,
+		Auth:           secret_1_auth,
+	}
+
+	update_repo_req_15 = &corev1.UpdatePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo-5", "TBD"),
+		Url:            podinfo_basic_auth_repo_url,
+		Auth:           foo_bar_auth,
+	}
+
+	update_repo_resp_1 = &corev1.UpdatePackageRepositoryResponse{
+		PackageRepoRef: repoRef("repo-1", "namespace-1"),
+	}
+
+	update_repo_resp_2 = &corev1.UpdatePackageRepositoryResponse{
+		PackageRepoRef: repoRefWithId("my-podinfo"),
+	}
+
+	update_repo_resp_3 = &corev1.UpdatePackageRepositoryResponse{
+		PackageRepoRef: repoRefWithId("my-podinfo-2"),
+	}
+
+	update_repo_resp_4 = &corev1.UpdatePackageRepositoryResponse{
+		PackageRepoRef: repoRefWithId("my-podinfo-4"),
+	}
+
+	update_repo_resp_5 = &corev1.UpdatePackageRepositoryResponse{
+		PackageRepoRef: repoRefWithId("my-podinfo-5"),
+	}
+
+	update_repo_detail_1 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "http://newurl.com",
+			Interval:        600,
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
+			Status:          repo_status_pending,
+		},
+	}
+
+	update_repo_detail_2 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        345,
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
+			Status:          repo_status_pending,
+		},
+	}
+
+	update_repo_detail_3 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        600,
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: true},
+			Status:          repo_status_pending,
+		},
+	}
+
+	update_repo_detail_4 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        600,
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
+			TlsConfig: &corev1.PackageRepositoryTlsConfig{
+				PackageRepoTlsConfigOneOf: &corev1.PackageRepositoryTlsConfig_SecretRef{
+					SecretRef: &corev1.SecretKeyReference{
+						Name: "secret-1",
+						Key:  "caFile",
+					},
+				},
+			},
+			Status: repo_status_pending,
+		},
+	}
+
+	update_repo_detail_5 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        600,
+			Auth:            &corev1.PackageRepositoryAuth{PassCredentials: false},
+			Status:          repo_status_pending,
+		},
+	}
+
+	update_repo_detail_6 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        600,
+			Auth:            secret_1_auth,
+			Status:          repo_status_pending,
+		},
+	}
+
+	update_repo_detail_7 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        600,
+			Auth:            &corev1.PackageRepositoryAuth{},
+			Status:          repo_status_pending,
+		},
+	}
+
+	update_repo_detail_8 = func(pub, priv []byte) *corev1.GetPackageRepositoryDetailResponse {
+		return &corev1.GetPackageRepositoryDetailResponse{
+			Detail: &corev1.PackageRepositoryDetail{
+				PackageRepoRef:  get_repo_detail_package_resp_ref,
+				Name:            "repo-1",
+				Description:     "",
+				NamespaceScoped: false,
+				Type:            "helm",
+				Url:             "https://example.repo.com/charts",
+				Interval:        600,
+				Auth:            tls_auth(pub, priv),
+				Status:          repo_status_pending,
 			},
 		}
+	}
+
+	update_repo_detail_9 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        600,
+			Auth:            &corev1.PackageRepositoryAuth{},
+			Status:          repo_status_pending,
+		},
+	}
+
+	update_repo_detail_10 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  get_repo_detail_package_resp_ref,
+			Name:            "repo-1",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             "https://example.repo.com/charts",
+			Interval:        600,
+			Auth:            foo_bar_auth,
+			Status:          repo_status_pending,
+		},
+	}
+
+	update_repo_detail_11 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  repoRefWithId("my-podinfo"),
+			Name:            "my-podinfo",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             podinfo_basic_auth_repo_url,
+			Interval:        600,
+			Auth:            foo_bar_auth,
+			Status:          podinfo_repo_status_1,
+		},
+	}
+
+	update_repo_detail_12 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  repoRefWithId("my-podinfo-2"),
+			Name:            "my-podinfo-2",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             podinfo_basic_auth_repo_url,
+			Interval:        600,
+			Auth:            foo_bar_auth,
+			Status:          podinfo_repo_status_1,
+		},
+	}
+
+	update_repo_detail_13 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  repoRefWithId("my-podinfo-4"),
+			Name:            "my-podinfo-4",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             podinfo_basic_auth_repo_url,
+			Interval:        600,
+			Auth:            secret_1_auth,
+			Status:          podinfo_repo_status_1,
+		},
+	}
+
+	update_repo_detail_14 = &corev1.GetPackageRepositoryDetailResponse{
+		Detail: &corev1.PackageRepositoryDetail{
+			PackageRepoRef:  repoRefWithId("my-podinfo-5"),
+			Name:            "my-podinfo-5",
+			Description:     "",
+			NamespaceScoped: false,
+			Type:            "helm",
+			Url:             podinfo_basic_auth_repo_url,
+			Interval:        600,
+			Auth:            foo_bar_auth,
+			Status:          podinfo_repo_status_1,
+		},
+	}
+
+	foo_bar_auth = &corev1.PackageRepositoryAuth{
+		Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH,
+		PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_UsernamePassword{
+			UsernamePassword: &corev1.UsernamePassword{
+				Username: "foo",
+				Password: "bar",
+			},
+		},
+	}
+
+	tls_auth = func(pub, priv []byte) *corev1.PackageRepositoryAuth {
+		return &corev1.PackageRepositoryAuth{
+			Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_TLS,
+			PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_TlsCertKey{
+				TlsCertKey: &corev1.TlsCertKey{
+					Cert: string(pub),
+					Key:  string(priv),
+				},
+			},
+		}
+	}
+
+	secret_1_auth = &corev1.PackageRepositoryAuth{
+		Type: corev1.PackageRepositoryAuth_PACKAGE_REPOSITORY_AUTH_TYPE_BASIC_AUTH,
+		PackageRepoAuthOneOf: &corev1.PackageRepositoryAuth_SecretRef{
+			SecretRef: &corev1.SecretKeyReference{
+				Name: "secret-1",
+			},
+		},
+	}
+
+	podinfo_repo_status_1 = &corev1.PackageRepositoryStatus{
+		Ready:      true,
+		Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
+		UserReason: "Succeeded: stored artifact for revision '9d3ac1eb708dfaebae14d7c88fd46afce8b1e0f7aace790d91758575dc8ce518'",
+	}
+
+	podinfo_repo_status_2 = &corev1.PackageRepositoryStatus{
+		Ready:      true,
+		Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
+		UserReason: "Succeeded: stored artifact for revision '651f952130ea96823711d08345b85e82be011dc6'",
+	}
+
+	podinfo_repo_status_3 = &corev1.PackageRepositoryStatus{
+		Ready:      true,
+		Reason:     corev1.PackageRepositoryStatus_STATUS_REASON_SUCCESS,
+		UserReason: "Succeeded: stored artifact for revision '2867920fb8f56575f4bc95ed878ee2a0c8ae79cdd2bca210a72aa3ff04defa1b'",
+	}
+
+	repo_status_pending = &corev1.PackageRepositoryStatus{
+		Reason: corev1.PackageRepositoryStatus_STATUS_REASON_PENDING,
+	}
+
+	podinfo_installed_refs = func(name string) []*corev1.ResourceRef {
+		return []*corev1.ResourceRef{
+			{
+				ApiVersion: "v1",
+				Kind:       "Service",
+				Name:       name,
+			},
+			{
+				ApiVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       name,
+			},
+		}
+	}
+
+	podinfo_notes = func(name string) string {
+		return "1. Get the application URL by running these commands:\n  " +
+			"echo \"Visit http://127.0.0.1:8080 to use your application\"\n  " +
+			"kubectl -n @TARGET_NS@ port-forward deploy/" + name + " 8080:9898\n"
+	}
+
+	// similar to repoRef but w/out Cluster or Plugin fields
+	repoRefInReq = func(id, namespace string) *corev1.PackageRepositoryReference {
+		return &corev1.PackageRepositoryReference{
+			Context: &corev1.Context{
+				Namespace: namespace,
+			},
+			Identifier: id,
+		}
+	}
+
+	newFluxHelmRelease = func(chartSpec helmv2.HelmChartTemplateSpec) *helmv2.HelmRelease {
+		return &helmv2.HelmRelease{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       helmv2.HelmReleaseKind,
+				APIVersion: helmv2.GroupVersion.String(),
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "my-podinfo",
+				Namespace:       "test",
+				ResourceVersion: "1",
+			},
+			Spec: helmv2.HelmReleaseSpec{
+				Chart: helmv2.HelmChartTemplate{
+					Spec: chartSpec,
+				},
+				Interval: metav1.Duration{Duration: 1 * time.Minute},
+			},
+		}
+	}
+
+	targetContext = func(namespace string) *corev1.Context {
+		return &corev1.Context{
+			// note that Namespace is just the prefix - the actual name will
+			// have a random string appended at the end, e.g. "test-1-h23r"
+			// this will happen during the running of the test
+			Namespace: namespace,
+			Cluster:   KubeappsCluster,
+		}
+	}
+
+	pkgAppVersion = func(version string) *corev1.PackageAppVersion {
+		return &corev1.PackageAppVersion{
+			PkgVersion: version,
+			AppVersion: version,
+		}
+	}
+
+	delete_repo_req_1 = &corev1.DeletePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-1", "namespace-1"),
+	}
+
+	delete_repo_req_2 = &corev1.DeletePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("repo-kaka", "namespace-kaka"),
+	}
+
+	delete_repo_req_3 = &corev1.DeletePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo", "TBD"),
+	}
+
+	delete_repo_req_4 = &corev1.DeletePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo-2", "TBD"),
+	}
+
+	delete_repo_req_5 = &corev1.DeletePackageRepositoryRequest{
+		PackageRepoRef: repoRefInReq("my-podinfo-3", "TBD"),
 	}
 )
