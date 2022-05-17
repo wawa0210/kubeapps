@@ -7,17 +7,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/vmware-tanzu/kubeapps/cmd/kubeapps-apis/plugins/helm/packages/v1alpha1/common"
 	"io/ioutil"
-	apiextfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apiserver/pkg/storage/names"
 	"net/url"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/vmware-tanzu/kubeapps/cmd/kubeapps-apis/plugins/helm/packages/v1alpha1/common"
+	apiextfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apiserver/pkg/storage/names"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/go-cmp/cmp"
@@ -1269,9 +1270,10 @@ core:
 			pluginConfig, err := common.ParsePluginConfig(filename)
 			if err != nil && !strings.Contains(err.Error(), tc.exp_error_str) {
 				t.Errorf("err got %q, want to find %q", err.Error(), tc.exp_error_str)
-			}
-			if got, want := pluginConfig.VersionsInSummary, tc.exp_versions_in_summary; !cmp.Equal(want, got, opts) {
-				t.Errorf("mismatch (-want +got):\n%s", cmp.Diff(want, got, opts))
+			} else if pluginConfig != nil {
+				if got, want := pluginConfig.VersionsInSummary, tc.exp_versions_in_summary; !cmp.Equal(want, got, opts) {
+					t.Errorf("mismatch (-want +got):\n%s", cmp.Diff(want, got, opts))
+				}
 			}
 		})
 	}
